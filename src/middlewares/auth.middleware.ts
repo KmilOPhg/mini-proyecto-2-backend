@@ -2,14 +2,15 @@ import { Request, Response, NextFunction } from "express";
 import { validationResult } from "express-validator";
 import { sendErrorResponse } from "../utils/JSONResponse.js";
 import jwt from "jsonwebtoken";
-import { prisma } from "../../lib/prisma.js";
+import { getDb } from "../../lib/firebase.js";
+import { collections } from "../../lib/firestoreCollections.js";
 
 export type JwtUserPayload = {
-  /** ObjectId de MongoDB en string */
+  /** ID del documento en `usuarios` */
   id: string;
   nombre: string;
   email: string | null;
-  /** ObjectId del rol en string */
+  /** ID del documento en `roles` (p. ej. `admin`) */
   rolId: string;
   estado: "ACTIVO" | "INACTIVO";
   clienteId: string | null;
@@ -17,11 +18,6 @@ export type JwtUserPayload = {
 
 export type AuthenticatedRequest = Request & {
   user?: JwtUserPayload;
-};
-
-/** Subconjunto del delegate Prisma suficiente para validateUniqueFields */
-type PrismaModelWithFindFirst = {
-  findFirst(args: { where: Record<string, unknown> }): Promise<unknown | null>;
 };
 
 // Verificar errores de express-validator
@@ -33,9 +29,9 @@ export const validateRequest = (req: Request, res: Response, next: NextFunction)
   next();
 };
 
-// Validar unicidad de campos en BD antes de crear/actualizar
+// Validar unicidad de campos en Firestore antes de crear/actualizar
 export const validateUniqueFields = (
-  model: PrismaModelWithFindFirst,
+  collectionName: string,
   fields: string[],
   options?: { excludeIdParam?: string }
 ) => {
@@ -44,18 +40,17 @@ export const validateUniqueFields = (
       let excludeId: string | undefined;
       if (options?.excludeIdParam) {
         const raw = req.params[options.excludeIdParam];
-        if (typeof raw === "string" && /^[a-f0-9]{24}$/i.test(raw)) excludeId = raw;
+        if (typeof raw === "string" && raw.length > 0) excludeId = decodeURIComponent(raw);
       }
+      const col = getDb().collection(collectionName);
       for (const field of fields) {
         if (req.body[field]) {
-          const existing = await model.findFirst({
-            where: {
-              [field]: req.body[field],
-              ...(excludeId !== undefined ? { id: { not: excludeId } } : {}),
-            },
-          });
-          if (existing) {
-            return sendErrorResponse(res, 400, `El ${field} ya está registrado`);
+          const snap = await col.where(field, "==", req.body[field]).limit(1).get();
+          if (!snap.empty) {
+            const docId = snap.docs[0].id;
+            if (excludeId === undefined || docId !== excludeId) {
+              return sendErrorResponse(res, 400, `El ${field} ya está registrado`);
+            }
           }
         }
       }
@@ -97,15 +92,16 @@ export const checkPermissions = (permisosRequeridos: string[]) => {
     try {
       if (!req.user?.rolId) return sendErrorResponse(res, 403, "Rol no encontrado");
 
-      const rol = await prisma.rol.findFirst({ where: { id: req.user.rolId } });
-      if (!rol) return sendErrorResponse(res, 403, "Rol no encontrado");
+      const rolSnap = await getDb().collection(collections.roles).doc(req.user.rolId).get();
+      if (!rolSnap.exists) return sendErrorResponse(res, 403, "Rol no encontrado");
+      const rol = rolSnap.data()!;
       if (!rol.activo) return sendErrorResponse(res, 403, "Rol inactivo");
 
-      const rolPermiso = await prisma.rolPermiso.findMany({
-        where: { rolId: rol.id },
-        include: { permiso: true },
-      });
-      const permisoUsuario = rolPermiso.map((rp) => rp.permiso.codigo);
+      const links = await getDb()
+        .collection(collections.rolPermisos)
+        .where("rolId", "==", req.user.rolId)
+        .get();
+      const permisoUsuario = links.docs.map((d) => d.data().permisoCodigo as string);
       const tienePermisos = permisosRequeridos.every((p) => permisoUsuario.includes(p));
       if (!tienePermisos) {
         return sendErrorResponse(res, 403, "No tienes permisos para acceder a este recurso");
