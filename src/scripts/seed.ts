@@ -70,7 +70,7 @@ async function seedPermisos() {
 
 // ─── Usuarios ────────────────────────────────────────────────────────────────
 
-async function seedUsuarios(roles: { id: number; nombre: string }[]) {
+async function seedUsuarios(roles: { id: string; nombre: string }[]) {
   const rolAdmin = roles.find((r) => r.nombre === "admin")!.id;
 
   const usuarios = [

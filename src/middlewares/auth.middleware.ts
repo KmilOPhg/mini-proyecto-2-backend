@@ -5,12 +5,14 @@ import jwt from "jsonwebtoken";
 import { prisma } from "../../lib/prisma.js";
 
 export type JwtUserPayload = {
-  id: number;
+  /** ObjectId de MongoDB en string */
+  id: string;
   nombre: string;
   email: string | null;
-  rolId: number;
+  /** ObjectId del rol en string */
+  rolId: string;
   estado: "ACTIVO" | "INACTIVO";
-  clienteId: number | null;
+  clienteId: string | null;
 };
 
 export type AuthenticatedRequest = Request & {
@@ -39,11 +41,10 @@ export const validateUniqueFields = (
 ) => {
   return async (req: Request, res: Response, next: NextFunction) => {
     try {
-      let excludeId: number | undefined;
+      let excludeId: string | undefined;
       if (options?.excludeIdParam) {
         const raw = req.params[options.excludeIdParam];
-        const parsed = Number(raw);
-        if (!Number.isNaN(parsed) && parsed > 0) excludeId = parsed;
+        if (typeof raw === "string" && /^[a-f0-9]{24}$/i.test(raw)) excludeId = raw;
       }
       for (const field of fields) {
         if (req.body[field]) {
@@ -72,14 +73,17 @@ export const authenticateToken = (req: AuthenticatedRequest, res: Response, next
   const token = authHeader && authHeader.split(" ")[1];
   if (!token) return sendErrorResponse(res, 401, "Token no proporcionado");
   try {
-    const decoded = jwt.verify(token, process.env.JWT_SECRET!) as Partial<JwtUserPayload> & { id: number };
+    const decoded = jwt.verify(token, process.env.JWT_SECRET!) as Record<string, unknown>;
     req.user = {
-      id: decoded.id,
-      nombre: decoded.nombre ?? "",
-      email: decoded.email ?? null,
-      rolId: typeof decoded.rolId === "number" ? decoded.rolId : 0,
+      id: decoded.id != null ? String(decoded.id) : "",
+      nombre: typeof decoded.nombre === "string" ? decoded.nombre : "",
+      email: decoded.email == null ? null : String(decoded.email),
+      rolId: decoded.rolId != null ? String(decoded.rolId) : "",
       estado: (decoded.estado as JwtUserPayload["estado"]) ?? "ACTIVO",
-      clienteId: decoded.clienteId ?? null,
+      clienteId:
+        decoded.clienteId === null || decoded.clienteId === undefined
+          ? null
+          : String(decoded.clienteId),
     };
     next();
   } catch {
@@ -91,7 +95,9 @@ export const authenticateToken = (req: AuthenticatedRequest, res: Response, next
 export const checkPermissions = (permisosRequeridos: string[]) => {
   return async (req: AuthenticatedRequest, res: Response, next: NextFunction) => {
     try {
-      const rol = await prisma.rol.findFirst({ where: { id: req.user?.rolId } });
+      if (!req.user?.rolId) return sendErrorResponse(res, 403, "Rol no encontrado");
+
+      const rol = await prisma.rol.findFirst({ where: { id: req.user.rolId } });
       if (!rol) return sendErrorResponse(res, 403, "Rol no encontrado");
       if (!rol.activo) return sendErrorResponse(res, 403, "Rol inactivo");
 
