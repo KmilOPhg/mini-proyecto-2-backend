@@ -16,7 +16,7 @@ API REST con **Node.js**, **TypeScript**, **Express**, **Firebase Admin SDK** (*
    npm install
    ```
 
-2. Variables de entorno:
+2. Variables de entorno (valores reales solo en **`.env`**, que no se sube a git; **`.env.example`** es plantilla):
 
    ```bash
    cp .env.example .env
@@ -24,8 +24,8 @@ API REST con **Node.js**, **TypeScript**, **Express**, **Firebase Admin SDK** (*
 
    Autenticación del Admin SDK (elige una):
 
-   - **Local:** en `.env`, define `GOOGLE_APPLICATION_CREDENTIALS` con la ruta al JSON descargado (no lo subas a git; está en `.gitignore` con patrón `*serviceAccount*.json`).
-   - **Render / CI:** define `FIREBASE_SERVICE_ACCOUNT` con el **contenido completo del JSON en una sola línea** (string JSON válido). El código hace `JSON.parse` y usa `admin.credential.cert(...)`.
+   - **Local con archivo:** `FIREBASE_SERVICE_ACCOUNT=./tu-clave.json` (ruta relativa al backend) **o** `GOOGLE_APPLICATION_CREDENTIALS` apuntando al JSON (convención de Google).
+   - **Render / CI:** `FIREBASE_SERVICE_ACCOUNT` con el **JSON completo en una sola línea** (objeto que empieza por `{`).
 
    También configura `JWT_SECRET` y, si aplica, `FRONTEND_URL` y `PORT`.
 

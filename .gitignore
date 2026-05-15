@@ -3,3 +3,4 @@ dist/
 .env
 *serviceAccount*.json
 *.log
+crossflow-bbbc0-firebase-adminsdk-fbsvc-6abb7dbf71.json
