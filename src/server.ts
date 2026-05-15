@@ -1,12 +1,12 @@
 import colors from "colors";
-import { prisma } from "../lib/prisma.js";
+import { getFirebaseApp } from "../lib/firebase.js";
 
 export async function connectDB() {
   try {
-    await prisma.$connect();
-    console.log(colors.bgGreen.bold("Conexión exitosa (Prisma)"));
+    getFirebaseApp();
+    console.log(colors.bgGreen.bold("Firebase Admin / Firestore listo"));
   } catch (err) {
     console.error(err);
-    console.log(colors.red.bold("Error al conectar a la BD"));
+    console.log(colors.red.bold("Error al inicializar Firebase"));
   }
 }

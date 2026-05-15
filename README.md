@@ -1,11 +1,12 @@
 # mini-proyecto-2-backend
 
-API REST con **Node.js**, **TypeScript**, **Express**, **Prisma** (**MongoDB**, NoSQL) y documentación **Swagger**.
+API REST con **Node.js**, **TypeScript**, **Express**, **Firebase Admin SDK** (**Firestore**, NoSQL) y documentación **Swagger**.
 
 ## Requisitos
 
 - Node.js 20+ (recomendado)
-- Instancia de **MongoDB** (local, Atlas u otro proveedor)
+- Proyecto en [Firebase Console](https://console.firebase.google.com/) con **Firestore** habilitado
+- Cuenta de servicio (JSON) para el backend: *Project settings → Service accounts → Generate new private key*
 
 ## Puesta en marcha
 
@@ -21,43 +22,43 @@ API REST con **Node.js**, **TypeScript**, **Express**, **Prisma** (**MongoDB**, 
    cp .env.example .env
    ```
 
-   En `DATABASE_URL` usa una URI válida de MongoDB, por ejemplo:
+   Autenticación del Admin SDK (elige una):
 
-   - Local: `mongodb://USER:PASS@localhost:27017/NOMBRE_BD?authSource=admin`
-   - Atlas: `mongodb+srv://USER:PASS@cluster.xxxxx.mongodb.net/NOMBRE_BD?retryWrites=true&w=majority`
+   - **Local:** en `.env`, define `GOOGLE_APPLICATION_CREDENTIALS` con la ruta al JSON descargado (no lo subas a git; está en `.gitignore` con patrón `*serviceAccount*.json`).
+   - **Render / CI:** define `FIREBASE_SERVICE_ACCOUNT` con el **contenido completo del JSON en una sola línea** (string JSON válido). El código hace `JSON.parse` y usa `admin.credential.cert(...)`.
 
-   Ajusta también `JWT_SECRET`, y si aplica `FRONTEND_URL` y `PORT`.
+   También configura `JWT_SECRET` y, si aplica, `FRONTEND_URL` y `PORT`.
 
-3. Esquema en la base de datos y cliente Prisma:
-
-   Prisma **no usa migraciones SQL** con MongoDB; se sincroniza el esquema con `db push`:
-
-   ```bash
-   npx prisma db push
-   npx prisma generate
-   ```
-
-   El cliente queda en `node_modules/@prisma/client`. En Render u otro CI, el build suele ser: `npm install && npx prisma generate && npm run build`; aplica el esquema en el servidor con `npx prisma db push` cuando toque (o en un paso de release con `DATABASE_URL`).
-
-4. Datos iniciales (roles, permisos, vínculos rol–permiso, usuario admin):
+3. Datos iniciales en Firestore:
 
    ```bash
    npm run db:seed
    ```
 
-5. Arranque en desarrollo:
+   Crea colecciones y documentos de ejemplo: `roles`, `permisos`, `rolPermisos`, `usuarios`.
+
+4. Arranque en desarrollo:
 
    ```bash
    npm run dev
    ```
 
-El servidor usa por defecto el puerto **1206** (configurable con `PORT`).
+Puerto por defecto: **1206** (`PORT`).
+
+## Modelo de datos (Firestore)
+
+| Colección     | ID de documento (ejemplo) | Campos relevantes |
+|---------------|---------------------------|-------------------|
+| `roles`       | `admin`, `user`, `cliente` | `nombre`, `descripcion`, `activo` |
+| `permisos`    | `usuarios.crear`, …       | `codigo`, `nombre`, `descripcion`, `modulo` |
+| `rolPermisos` | `admin__usuarios.crear` (codificado) | `rolId`, `permisoCodigo` |
+| `usuarios`    | ID autogenerado           | `email`, `documento`, `passwordHash`, `rolId` (id del rol, p. ej. `admin`) |
+
+El JWT debe incluir `rolId` como **id del documento de rol** (p. ej. `admin`) e `id` como **id del documento de usuario** en `usuarios`.
 
 ## Documentación OpenAPI
 
-Con el servidor en marcha:
-
-- Interfaz Swagger UI: [http://localhost:1206/api-docs](http://localhost:1206/api-docs)
+- Swagger UI: [http://localhost:1206/api-docs](http://localhost:1206/api-docs)
 - JSON: [http://localhost:1206/api-docs.json](http://localhost:1206/api-docs.json)
 
 ## Scripts npm
@@ -65,40 +66,31 @@ Con el servidor en marcha:
 | Script | Descripción |
 |--------|-------------|
 | `npm run dev` | Servidor con recarga (`tsx watch`) |
-| `npm run build` | Compila TypeScript y ajusta extensiones `.js` en `dist/` |
-| `npm run prod` | Ejecuta el build (`node dist/src/index.js`) |
-| `npm run typecheck` | Comprueba tipos sin emitir archivos |
-| `npm run db:push` | Sincroniza `schema.prisma` con MongoDB (`prisma db push`) |
-| `npm run db:migrate` | Alias de `db:push` (no hay migraciones SQL en Mongo) |
-| `npm run db:seed` | Ejecuta el seeder |
-| `npm run db:reset` | **Borra datos** y vuelve a aplicar el esquema (`db push --force-reset`) |
-| `npm run db:reset:seed` | Reset + seed |
-| `npm run deploy` | Solo `prisma db push` (ajusta en tu plataforma si necesitas seed u otros pasos) |
-
-## Modelos e IDs
-
-Los documentos usan **ObjectId** de MongoDB; en TypeScript y en el JWT se representan como **string** de 24 caracteres hex (`id` de usuario, `rolId`, etc.).
+| `npm run build` | Compila TypeScript y extensiones `.js` en `dist/` |
+| `npm run prod` | `node dist/src/index.js` |
+| `npm run typecheck` | Verificación de tipos |
+| `npm run db:seed` | Puebla Firestore (idempotente con `merge` donde aplica) |
 
 ## Estructura principal
 
-- `src/app.ts` — Express, CORS, Swagger, rutas y middleware de errores
-- `src/routes/` — Definición de rutas y validaciones
-- `src/controllers/` — Handlers HTTP (delegan en servicios)
-- `src/services/` — Lógica de negocio y acceso a datos
-- `src/middlewares/` — Autenticación JWT, permisos, validación, errores
-- `src/utils/` — Utilidades compartidas (`AppError`, respuestas JSON, etc.)
-- `lib/prisma.ts` — Cliente Prisma (singleton)
-- `prisma/schema.prisma` — Modelos (MongoDB)
-- `src/scripts/seed.ts` — Datos iniciales
+- `src/app.ts` — Express, CORS, Swagger, rutas, errores
+- `lib/firebase.ts` — Inicialización de Firebase Admin y acceso a Firestore
+- `lib/firestoreCollections.ts` — Nombres de colecciones
+- `src/middlewares/` — JWT, permisos (`checkPermissions` lee `rolPermisos`), validación
+- `src/scripts/seed.ts` — Seed de Firestore
 
 ## Usuario de prueba (tras `db:seed`)
-
-Tras ejecutar el seed, existe un usuario administrador de ejemplo (solo para desarrollo; cámbialo o elimínalo en producción):
 
 - **Email:** `admin@mini-proyecto-2-backend.com`
 - **Contraseña:** `Admin1234!`
 
-El rol `admin` queda vinculado a los permisos definidos en el seed para que encaje con `checkPermissions` en las rutas protegidas.
+Solo para desarrollo; en producción rota credenciales y reglas de Firestore según tu modelo de amenazas.
+
+## Despliegue (Render u otros)
+
+- **Build:** `npm install && npm run build` (no hace falta `prisma generate`).
+- Asegura `FIREBASE_SERVICE_ACCOUNT` o credenciales equivalentes en el entorno.
+- Ejecuta `npm run db:seed` una vez (o desde tu pipeline) si la base está vacía.
 
 ## Licencia
 
