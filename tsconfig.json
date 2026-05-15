@@ -9,9 +9,5 @@
     "esModuleInterop": true
   },
   "include": ["src/**/*.ts", "lib/**/*.ts"],
-  "exclude": ["node_modules", "dist"],
-  "prisma": {
-    "schema": "./prisma/schema.prisma",
-    "output": "./src/generated/prisma"
-  }
+  "exclude": ["node_modules", "dist", "src/generated"]
 }
