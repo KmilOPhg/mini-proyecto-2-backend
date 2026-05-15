@@ -30,6 +30,8 @@ API REST con **Node.js**, **TypeScript**, **Express**, **Prisma** (PostgreSQL) y
    npx prisma generate
    ```
 
+   El cliente se genera en `node_modules/@prisma/client` (salida por defecto), compatible con `npm run build` y con servicios como Render: el comando de build debe incluir `npx prisma generate` antes de `npm run build`.
+
 4. Datos iniciales (roles, permisos, vínculos rol–permiso, usuario admin):
 
    ```bash
