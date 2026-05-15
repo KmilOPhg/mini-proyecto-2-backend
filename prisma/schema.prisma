@@ -3,12 +3,12 @@ generator client {
 }
 
 datasource db {
-  provider = "postgresql"
+  provider = "mongodb"
   url      = env("DATABASE_URL")
 }
 
 model Rol {
-  id          Int          @id @default(autoincrement())
+  id          String       @id @default(auto()) @map("_id") @db.ObjectId
   nombre      String       @unique
   descripcion String?
   activo      Boolean      @default(true)
@@ -17,7 +17,7 @@ model Rol {
 }
 
 model Permiso {
-  id          Int          @id @default(autoincrement())
+  id          String       @id @default(auto()) @map("_id") @db.ObjectId
   codigo      String       @unique
   nombre      String
   descripcion String?
@@ -26,20 +26,21 @@ model Permiso {
 }
 
 model RolPermiso {
-  rolId     Int
-  permisoId Int
+  id        String  @id @default(auto()) @map("_id") @db.ObjectId
+  rolId     String  @db.ObjectId
+  permisoId String  @db.ObjectId
   rol       Rol     @relation(fields: [rolId], references: [id], onDelete: Cascade)
   permiso   Permiso @relation(fields: [permisoId], references: [id], onDelete: Cascade)
 
-  @@id([rolId, permisoId])
+  @@unique([rolId, permisoId])
 }
 
 model Usuario {
-  id           Int    @id @default(autoincrement())
+  id           String @id @default(auto()) @map("_id") @db.ObjectId
   nombre       String
   documento    String @unique
   email        String @unique
   passwordHash String
-  rolId        Int
+  rolId        String @db.ObjectId
   rol          Rol    @relation(fields: [rolId], references: [id])
 }
