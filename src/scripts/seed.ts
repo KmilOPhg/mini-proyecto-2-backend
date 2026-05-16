@@ -3,8 +3,37 @@ import bcrypt from "bcrypt";
 import { getDb, getFirebaseApp } from "../../lib/firebase.js";
 import { collections } from "../../lib/firestoreCollections.js";
 
-// Asegura Firebase antes de tocar Firestore
 getFirebaseApp();
+
+/** Borra todos los documentos de una colección (lotes de 400 por límite de batch). */
+async function deleteAllDocs(collectionName: string) {
+  const db = getDb();
+  const snap = await db.collection(collectionName).get();
+  if (snap.empty) return;
+
+  let batch = db.batch();
+  let n = 0;
+  for (const doc of snap.docs) {
+    batch.delete(doc.ref);
+    n++;
+    if (n >= 400) {
+      await batch.commit();
+      batch = db.batch();
+      n = 0;
+    }
+  }
+  if (n > 0) await batch.commit();
+}
+
+/** Orden: primero enlaces y usuarios, luego catálogos. */
+async function clearSeedCollections() {
+  await deleteAllDocs(collections.rolPermisos);
+  await deleteAllDocs(collections.usernames);
+  await deleteAllDocs(collections.usuarios);
+  await deleteAllDocs(collections.permisos);
+  await deleteAllDocs(collections.roles);
+  console.log("🗑 Colecciones de seed vaciadas.\n");
+}
 
 // ─── Roles ───────────────────────────────────────────────────────────────────
 
@@ -14,13 +43,11 @@ async function seedRoles() {
     { id: "admin", nombre: "admin", descripcion: "Administrador del sistema" },
     { id: "user", nombre: "user", descripcion: "Usuario operativo" },
     { id: "cliente", nombre: "cliente", descripcion: "Cliente externo" },
+    { id: "estudiante", nombre: "estudiante", descripcion: "Estudiante de la plataforma (Firebase Auth)" },
   ] as const;
 
   for (const r of list) {
-    await col.doc(r.id).set(
-      { nombre: r.nombre, descripcion: r.descripcion, activo: true },
-      { merge: true }
-    );
+    await col.doc(r.id).set({ nombre: r.nombre, descripcion: r.descripcion, activo: true });
   }
 
   const snap = await col.get();
@@ -42,10 +69,12 @@ async function seedPermisos() {
   ];
 
   for (const p of permisos) {
-    await col.doc(p.codigo).set(
-      { codigo: p.codigo, nombre: p.nombre, descripcion: p.descripcion, modulo: p.modulo },
-      { merge: true }
-    );
+    await col.doc(p.codigo).set({
+      codigo: p.codigo,
+      nombre: p.nombre,
+      descripcion: p.descripcion,
+      modulo: p.modulo,
+    });
   }
 
   const snap = await col.get();
@@ -58,7 +87,7 @@ async function seedPermisos() {
   return result;
 }
 
-// ─── Rol ↔ permiso (colección `rolPermisos`) ─────────────────────────────────
+// ─── Rol ↔ permiso ───────────────────────────────────────────────────────────
 
 function rolPermisoDocId(rolId: string, permisoCodigo: string) {
   return `${rolId}__${encodeURIComponent(permisoCodigo)}`;
@@ -74,10 +103,7 @@ async function seedRolPermisos() {
 
   for (const doc of permisosSnap.docs) {
     const codigo = doc.data().codigo as string;
-    await col.doc(rolPermisoDocId(adminId, codigo)).set(
-      { rolId: adminId, permisoCodigo: codigo },
-      { merge: true }
-    );
+    await col.doc(rolPermisoDocId(adminId, codigo)).set({ rolId: adminId, permisoCodigo: codigo });
   }
 
   const links = await col.where("rolId", "==", adminId).get();
@@ -86,44 +112,32 @@ async function seedRolPermisos() {
 
 // ─── Usuarios ────────────────────────────────────────────────────────────────
 
+const SEED_ADMIN_USER_DOC_ID = "seed-admin";
+
 async function seedUsuarios(roles: { id: string; nombre: string }[]) {
   const rolAdmin = roles.find((r) => r.nombre === "admin")!.id;
   const col = getDb().collection(collections.usuarios);
 
-  const usuarios = [
-    {
-      nombre: "Admin Principal",
-      documento: "1000000001",
-      email: "admin@mini-proyecto-2-backend.com",
-      password: "Admin1234!",
-      rolId: rolAdmin,
-    },
-  ];
+  const u = {
+    nombre: "Admin Principal",
+    documento: "1000000001",
+    email: "admin@admin.com",
+    password: "Admin1234!",
+    rolId: rolAdmin,
+  };
 
-  for (const u of usuarios) {
-    const passwordHash = await bcrypt.hash(u.password, 10);
-    const existing = await col.where("email", "==", u.email).limit(1).get();
-
-    const payload = {
-      nombre: u.nombre,
-      documento: u.documento,
-      email: u.email,
-      passwordHash,
-      rolId: u.rolId,
-    };
-
-    if (existing.empty) {
-      await col.add(payload);
-    } else {
-      await existing.docs[0].ref.set(payload, { merge: true });
-    }
-  }
-
-  const snap = await col.get();
-  const result = snap.docs.map((d) => {
-    const data = d.data();
-    return { id: d.id, nombre: data.nombre as string, email: data.email as string };
+  const passwordHash = await bcrypt.hash(u.password, 10);
+  await col.doc(SEED_ADMIN_USER_DOC_ID).set({
+    nombre: u.nombre,
+    documento: u.documento,
+    email: u.email,
+    passwordHash,
+    rolId: u.rolId,
   });
+
+  const doc = await col.doc(SEED_ADMIN_USER_DOC_ID).get();
+  const data = doc.data()!;
+  const result = [{ id: doc.id, nombre: data.nombre as string, email: data.email as string }];
   console.log("✔ Usuarios:");
   console.table(result);
 }
@@ -131,7 +145,8 @@ async function seedUsuarios(roles: { id: string; nombre: string }[]) {
 // ─── Main ─────────────────────────────────────────────────────────────────────
 
 async function main() {
-  console.log("🌱 Iniciando seed (Firestore)...\n");
+  console.log("🌱 Seed: se borran las colecciones y se vuelve a insertar todo.\n");
+  await clearSeedCollections();
   const roles = await seedRoles();
   await seedPermisos();
   await seedRolPermisos();

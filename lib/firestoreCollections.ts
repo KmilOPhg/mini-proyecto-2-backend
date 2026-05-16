@@ -4,4 +4,6 @@ export const collections = {
   permisos: "permisos",
   rolPermisos: "rolPermisos",
   usuarios: "usuarios",
+  /** Documento id = username normalizado (minúsculas); campos: `{ uid: string }` */
+  usernames: "usernames",
 } as const;

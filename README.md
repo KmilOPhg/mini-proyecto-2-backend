@@ -1,11 +1,11 @@
 # mini-proyecto-2-backend
 
-API REST con **Node.js**, **TypeScript**, **Express**, **Firebase Admin SDK** (**Firestore**, NoSQL) y documentación **Swagger**.
+API REST con **Node.js**, **TypeScript**, **Express**, **Firebase Admin SDK** (**Auth** + **Firestore**) y documentación **Swagger** (definición centralizada en `src/docs/swagger.ts`).
 
 ## Requisitos
 
 - Node.js 20+ (recomendado)
-- Proyecto en [Firebase Console](https://console.firebase.google.com/) con **Firestore** habilitado
+- Proyecto en [Firebase Console](https://console.firebase.google.com/) con **Authentication** (Email/contraseña y **Google** habilitados en el cliente) y **Firestore** habilitados
 - Cuenta de servicio (JSON) para el backend: *Project settings → Service accounts → Generate new private key*
 
 ## Puesta en marcha
@@ -22,12 +22,12 @@ API REST con **Node.js**, **TypeScript**, **Express**, **Firebase Admin SDK** (*
    cp .env.example .env
    ```
 
-   Autenticación del Admin SDK (elige una):
-
-   - **Local con archivo:** `FIREBASE_SERVICE_ACCOUNT=./tu-clave.json` (ruta relativa al backend) **o** `GOOGLE_APPLICATION_CREDENTIALS` apuntando al JSON (convención de Google).
-   - **Render / CI:** `FIREBASE_SERVICE_ACCOUNT` con el **JSON completo en una sola línea** (objeto que empieza por `{`).
-
-   También configura `JWT_SECRET` y, si aplica, `FRONTEND_URL` y `PORT`.
+   | Variable | Uso |
+   |----------|-----|
+   | `FIREBASE_SERVICE_ACCOUNT` | JSON del service account en **una línea** que empiece por `{`, **o** ruta a un `.json` relativa al backend (p. ej. `./clave.json`). Alternativa local: `GOOGLE_APPLICATION_CREDENTIALS` apuntando al JSON. |
+   | `JWT_SECRET` | Obligatorio para firmar el **JWT del backend** que devuelve la sesión estudiantil cuando el perfil está completo. |
+   | `INSTITUTIONAL_EMAIL_DOMAINS` | Opcional. Lista separada por comas de dominios permitidos en **registro manual** (ej. `unal.edu.co,unal.edu`). **Vacío** = se acepta cualquier dominio (útil en desarrollo). |
+   | `PORT`, `FRONTEND_URL` | Puerto (por defecto **1206**) y origen CORS del frontend. |
 
 3. Datos iniciales en Firestore:
 
@@ -35,7 +35,7 @@ API REST con **Node.js**, **TypeScript**, **Express**, **Firebase Admin SDK** (*
    npm run db:seed
    ```
 
-   Crea colecciones y documentos de ejemplo: `roles`, `permisos`, `rolPermisos`, `usuarios`.
+   Vacía y recrea: `roles`, `permisos`, `rolPermisos`, `usuarios`, `usernames` (reservas de *username*). El rol **`estudiante`** debe existir antes de registrar alumnos por API.
 
 4. Arranque en desarrollo:
 
@@ -43,23 +43,44 @@ API REST con **Node.js**, **TypeScript**, **Express**, **Firebase Admin SDK** (*
    npm run dev
    ```
 
-Puerto por defecto: **1206** (`PORT`).
+## Autenticación estudiantil (Firebase + API)
+
+El backend **no** abre el popup de Google ni escribe la contraseña en el navegador: eso lo hace el **cliente** con el SDK de Firebase. Aquí se crean usuarios con **Admin SDK**, se guarda el **perfil en Firestore** y se validan **ID tokens** de Firebase.
+
+### Registro manual (email + contraseña)
+
+1. `POST /api/auth/register` — Crea usuario en **Firebase Auth**, reserva **username** y guarda perfil en **`usuarios/{uid}`** con rol `estudiante`. Respuesta incluye **`customToken`** para que el cliente ejecute `signInWithCustomToken`.
+2. El cliente inicia sesión en Firebase y obtiene el **ID token**.
+3. `POST /api/auth/session` con cabecera `Authorization: Bearer <ID token Firebase>` — Si el perfil está completo, la respuesta incluye **`data.token`** (JWT del backend, 7 días) para rutas que usen `authenticateToken`.
+
+### Registro / login con Google
+
+1. El cliente autentica con **Google** (Firebase) y obtiene el **ID token**.
+2. `POST /api/auth/session` con el mismo Bearer — **Primer ingreso:** se crea perfil sin username → **`needsUsername: true`**, **`token`** null. **Usuario ya completo:** **`needsUsername: false`** y JWT en **`data.token`**.
+3. `POST /api/auth/google/complete-username` — Mismo Bearer (sesión Google), body `{ "username" }` — Completa perfil y devuelve JWT.
+
+### Utilidad
+
+- `GET /api/auth/username-available?username=` — Comprueba si el nombre de usuario está libre (formato válido y unicidad).
 
 ## Modelo de datos (Firestore)
 
-| Colección     | ID de documento (ejemplo) | Campos relevantes |
-|---------------|---------------------------|-------------------|
-| `roles`       | `admin`, `user`, `cliente` | `nombre`, `descripcion`, `activo` |
-| `permisos`    | `usuarios.crear`, …       | `codigo`, `nombre`, `descripcion`, `modulo` |
-| `rolPermisos` | `admin__usuarios.crear` (codificado) | `rolId`, `permisoCodigo` |
-| `usuarios`    | ID autogenerado           | `email`, `documento`, `passwordHash`, `rolId` (id del rol, p. ej. `admin`) |
+| Colección | ID de documento | Descripción |
+|-----------|------------------|-------------|
+| `roles` | `admin`, `user`, `cliente`, `estudiante`, … | Catálogo de roles. Los estudiantes nuevos usan **`estudiante`**. |
+| `permisos` | `usuarios.crear`, … | Permisos del sistema. |
+| `rolPermisos` | `admin__usuarios.crear`, … | Enlaces rol ↔ permiso. |
+| `usuarios` | **Firebase UID** (estudiantes) o `seed-admin` (demo) | Estudiante: `firebaseUid`, `nombres`, `apellidos`, `username`, `avatar`, `email`, `rolId`, `profileComplete`, `authProviders`, etc. Admin seed: `passwordHash`, `documento`, sin Firebase. |
+| `usernames` | Username **normalizado** (minúsculas) | Documento `{ uid }` apuntando al UID de Firebase; garantiza unicidad. |
 
-El JWT debe incluir `rolId` como **id del documento de rol** (p. ej. `admin`) e `id` como **id del documento de usuario** en `usuarios`.
+El JWT del backend (`authenticateToken`) usa **`rolId`** como id del documento en `roles` e **`id`** como id del documento en `usuarios` (para estudiantes coincide con el **UID de Firebase**).
 
 ## Documentación OpenAPI
 
-- Swagger UI: [http://localhost:1206/api-docs](http://localhost:1206/api-docs)
-- JSON: [http://localhost:1206/api-docs.json](http://localhost:1206/api-docs.json)
+- **Swagger UI:** [http://localhost:1206/api-docs](http://localhost:1206/api-docs)
+- **JSON:** [http://localhost:1206/api-docs.json](http://localhost:1206/api-docs.json)
+
+Los paths y esquemas de **Auth** están definidos en **`src/docs/swagger.ts`** (no en archivos de rutas).
 
 ## Scripts npm
 
@@ -69,28 +90,33 @@ El JWT debe incluir `rolId` como **id del documento de rol** (p. ej. `admin`) e 
 | `npm run build` | Compila TypeScript y extensiones `.js` en `dist/` |
 | `npm run prod` | `node dist/src/index.js` |
 | `npm run typecheck` | Verificación de tipos |
-| `npm run db:seed` | Puebla Firestore (idempotente con `merge` donde aplica) |
+| `npm run db:seed` | **Vacía** colecciones de seed y **vuelve a crear** roles, permisos, enlaces, usuario admin y tabla `usernames` |
 
 ## Estructura principal
 
 - `src/app.ts` — Express, CORS, Swagger, rutas, errores
-- `lib/firebase.ts` — Inicialización de Firebase Admin y acceso a Firestore
+- `lib/firebase.ts` — Firebase Admin (Firestore + **Auth**)
 - `lib/firestoreCollections.ts` — Nombres de colecciones
-- `src/middlewares/` — JWT, permisos (`checkPermissions` lee `rolPermisos`), validación
+- `src/routes/auth.routes.ts` — Rutas `/auth/*`
+- `src/services/studentAuth.service.ts` — Lógica de registro, sesión y username Google
+- `src/middlewares/auth.middleware.ts` — JWT interno, permisos, `express-validator`
+- `src/middlewares/firebase-id-token.middleware.ts` — Verificación del **ID token** de Firebase
+- `src/docs/swagger.ts` — Especificación OpenAPI
 - `src/scripts/seed.ts` — Seed de Firestore
 
-## Usuario de prueba (tras `db:seed`)
+## Usuario de prueba admin (tras `db:seed`)
 
-- **Email:** `admin@mini-proyecto-2-backend.com`
+- **Email:** `admin@admin.com`
 - **Contraseña:** `Admin1234!`
+- **Id de documento Firestore:** `seed-admin` (JWT de demo con `id: "seed-admin"`)
 
-Solo para desarrollo; en producción rota credenciales y reglas de Firestore según tu modelo de amenazas.
+Este usuario **no** pasa por Firebase Auth de estudiantes; sirve para pruebas del modelo legacy en Firestore.
 
 ## Despliegue (Render u otros)
 
-- **Build:** `npm install && npm run build` (no hace falta `prisma generate`).
-- Asegura `FIREBASE_SERVICE_ACCOUNT` o credenciales equivalentes en el entorno.
-- Ejecuta `npm run db:seed` una vez (o desde tu pipeline) si la base está vacía.
+- **Build:** `npm install && npm run build`
+- Asegura `FIREBASE_SERVICE_ACCOUNT` (o credenciales equivalentes), **`JWT_SECRET`** y dominios de correo si usás **`INSTITUTIONAL_EMAIL_DOMAINS`**.
+- Ejecuta `npm run db:seed` cuando quieras **resetear** datos de demo (incluye borrar reservas en `usernames`).
 
 ## Licencia
 
