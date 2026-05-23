@@ -14,6 +14,11 @@ const options: swaggerJSDoc.Options = {
         description:
           "Autenticación estudiantil: Firebase Auth + perfil en Firestore (US-01 a US-03). El JWT del backend se obtiene en `POST /auth/session` o `POST /auth/google/complete-username` cuando el perfil está completo.",
       },
+      {
+        name: "Usuarios",
+        description:
+          "CRUD de perfiles en Firestore (`usuarios`). Requiere JWT del backend (`POST /auth/login` para admin o sesión estudiantil completa) y permisos `usuarios.*`.",
+      },
     ],
     servers: [
       {
@@ -135,9 +140,282 @@ const options: swaggerJSDoc.Options = {
             errors: { description: "Detalle opcional (p. ej. express-validator)." },
           },
         },
+        LoginAdminBody: {
+          type: "object",
+          required: ["email", "password"],
+          properties: {
+            email: { type: "string", format: "email" },
+            password: { type: "string", format: "password" },
+          },
+        },
+        LoginAdminData: {
+          type: "object",
+          properties: {
+            token: { type: "string", description: "JWT del backend (7 días)." },
+            user: { $ref: "#/components/schemas/UsuarioPublico" },
+          },
+        },
+        UsuarioPublico: {
+          type: "object",
+          properties: {
+            id: { type: "string" },
+            tipo: { type: "string", enum: ["admin", "estudiante"] },
+            nombre: { type: "string", nullable: true },
+            nombres: { type: "string", nullable: true },
+            apellidos: { type: "string", nullable: true },
+            documento: { type: "string", nullable: true },
+            username: { type: "string", nullable: true },
+            avatar: { type: "string", nullable: true },
+            email: { type: "string" },
+            rolId: { type: "string" },
+            estado: { type: "string", enum: ["ACTIVO", "INACTIVO"] },
+            profileComplete: { type: "boolean" },
+          },
+        },
+        CrearUsuarioAdminBody: {
+          type: "object",
+          required: ["nombre", "documento", "email", "password", "rolId"],
+          properties: {
+            nombre: { type: "string", maxLength: 200 },
+            documento: { type: "string", maxLength: 30 },
+            email: { type: "string", format: "email" },
+            password: { type: "string", minLength: 8 },
+            rolId: { type: "string", example: "user" },
+          },
+        },
+        ActualizarUsuarioBody: {
+          type: "object",
+          properties: {
+            nombre: { type: "string" },
+            documento: { type: "string" },
+            email: { type: "string", format: "email" },
+            password: { type: "string", minLength: 8 },
+            rolId: { type: "string" },
+            estado: { type: "string", enum: ["ACTIVO", "INACTIVO"] },
+          },
+        },
+        ListarUsuariosData: {
+          type: "object",
+          properties: {
+            items: { type: "array", items: { $ref: "#/components/schemas/UsuarioPublico" } },
+            total: { type: "integer" },
+            page: { type: "integer" },
+            limit: { type: "integer" },
+          },
+        },
       },
     },
     paths: {
+      "/auth/login": {
+        post: {
+          tags: ["Usuarios"],
+          summary: "Login administrativo (email + contraseña en Firestore)",
+          description:
+            "Para usuarios con `passwordHash` en Firestore (p. ej. `seed-admin` tras `db:seed`). Devuelve JWT del backend para rutas con `authenticateToken`.",
+          requestBody: {
+            required: true,
+            content: {
+              "application/json": {
+                schema: { $ref: "#/components/schemas/LoginAdminBody" },
+              },
+            },
+          },
+          responses: {
+            "200": {
+              description: "Sesión iniciada.",
+              content: {
+                "application/json": {
+                  schema: {
+                    allOf: [
+                      { $ref: "#/components/schemas/ApiSuccessEnvelope" },
+                      {
+                        type: "object",
+                        properties: { data: { $ref: "#/components/schemas/LoginAdminData" } },
+                      },
+                    ],
+                  },
+                },
+              },
+            },
+            "401": {
+              description: "Credenciales inválidas.",
+              content: {
+                "application/json": { schema: { $ref: "#/components/schemas/ApiErrorEnvelope" } },
+              },
+            },
+          },
+        },
+      },
+      "/auth/users": {
+        get: {
+          tags: ["Usuarios"],
+          summary: "Listar usuarios",
+          security: [{ bearerAuth: [] }],
+          parameters: [
+            { in: "query", name: "page", schema: { type: "integer", minimum: 1 } },
+            { in: "query", name: "limit", schema: { type: "integer", minimum: 1, maximum: 100 } },
+            { in: "query", name: "rolId", schema: { type: "string" } },
+            { in: "query", name: "estado", schema: { type: "string", enum: ["ACTIVO", "INACTIVO"] } },
+            { in: "query", name: "email", schema: { type: "string" } },
+          ],
+          responses: {
+            "200": {
+              description: "Listado paginado.",
+              content: {
+                "application/json": {
+                  schema: {
+                    allOf: [
+                      { $ref: "#/components/schemas/ApiSuccessEnvelope" },
+                      {
+                        type: "object",
+                        properties: { data: { $ref: "#/components/schemas/ListarUsuariosData" } },
+                      },
+                    ],
+                  },
+                },
+              },
+            },
+            "403": {
+              description: "Sin permiso `usuarios.consultar`.",
+              content: {
+                "application/json": { schema: { $ref: "#/components/schemas/ApiErrorEnvelope" } },
+              },
+            },
+          },
+        },
+        post: {
+          tags: ["Usuarios"],
+          summary: "Crear usuario administrativo",
+          security: [{ bearerAuth: [] }],
+          requestBody: {
+            required: true,
+            content: {
+              "application/json": {
+                schema: { $ref: "#/components/schemas/CrearUsuarioAdminBody" },
+              },
+            },
+          },
+          responses: {
+            "201": {
+              description: "Usuario creado.",
+              content: {
+                "application/json": {
+                  schema: {
+                    allOf: [
+                      { $ref: "#/components/schemas/ApiSuccessEnvelope" },
+                      {
+                        type: "object",
+                        properties: { data: { $ref: "#/components/schemas/UsuarioPublico" } },
+                      },
+                    ],
+                  },
+                },
+              },
+            },
+            "403": {
+              description: "Sin permiso `usuarios.crear`.",
+              content: {
+                "application/json": { schema: { $ref: "#/components/schemas/ApiErrorEnvelope" } },
+              },
+            },
+            "409": {
+              description: "Email o documento duplicado.",
+              content: {
+                "application/json": { schema: { $ref: "#/components/schemas/ApiErrorEnvelope" } },
+              },
+            },
+          },
+        },
+      },
+      "/auth/users/{id}": {
+        get: {
+          tags: ["Usuarios"],
+          summary: "Obtener usuario por id",
+          security: [{ bearerAuth: [] }],
+          parameters: [{ in: "path", name: "id", required: true, schema: { type: "string" } }],
+          responses: {
+            "200": {
+              description: "Usuario encontrado.",
+              content: {
+                "application/json": {
+                  schema: {
+                    allOf: [
+                      { $ref: "#/components/schemas/ApiSuccessEnvelope" },
+                      {
+                        type: "object",
+                        properties: { data: { $ref: "#/components/schemas/UsuarioPublico" } },
+                      },
+                    ],
+                  },
+                },
+              },
+            },
+            "404": {
+              description: "No encontrado.",
+              content: {
+                "application/json": { schema: { $ref: "#/components/schemas/ApiErrorEnvelope" } },
+              },
+            },
+          },
+        },
+        put: {
+          tags: ["Usuarios"],
+          summary: "Actualizar usuario",
+          security: [{ bearerAuth: [] }],
+          parameters: [{ in: "path", name: "id", required: true, schema: { type: "string" } }],
+          requestBody: {
+            content: {
+              "application/json": {
+                schema: { $ref: "#/components/schemas/ActualizarUsuarioBody" },
+              },
+            },
+          },
+          responses: {
+            "200": {
+              description: "Usuario actualizado.",
+              content: {
+                "application/json": {
+                  schema: {
+                    allOf: [
+                      { $ref: "#/components/schemas/ApiSuccessEnvelope" },
+                      {
+                        type: "object",
+                        properties: { data: { $ref: "#/components/schemas/UsuarioPublico" } },
+                      },
+                    ],
+                  },
+                },
+              },
+            },
+          },
+        },
+      },
+      "/auth/users/{id}/deshabilitar": {
+        patch: {
+          tags: ["Usuarios"],
+          summary: "Deshabilitar usuario",
+          security: [{ bearerAuth: [] }],
+          parameters: [{ in: "path", name: "id", required: true, schema: { type: "string" } }],
+          responses: {
+            "200": {
+              description: "Usuario marcado como INACTIVO.",
+              content: {
+                "application/json": {
+                  schema: {
+                    allOf: [
+                      { $ref: "#/components/schemas/ApiSuccessEnvelope" },
+                      {
+                        type: "object",
+                        properties: { data: { $ref: "#/components/schemas/UsuarioPublico" } },
+                      },
+                    ],
+                  },
+                },
+              },
+            },
+          },
+        },
+      },
       "/auth/register": {
         post: {
           tags: ["Auth"],

@@ -133,6 +133,7 @@ async function seedUsuarios(roles: { id: string; nombre: string }[]) {
     email: u.email,
     passwordHash,
     rolId: u.rolId,
+    estado: "ACTIVO",
   });
 
   const doc = await col.doc(SEED_ADMIN_USER_DOC_ID).get();
