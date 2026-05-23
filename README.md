@@ -63,6 +63,30 @@ El backend **no** abre el popup de Google ni escribe la contraseña en el navega
 
 - `GET /api/auth/username-available?username=` — Comprueba si el nombre de usuario está libre (formato válido y unicidad).
 
+## CRUD de usuarios (administración)
+
+Rutas bajo **`/api/auth/users`**. Requieren cabecera `Authorization: Bearer <JWT del backend>` y permisos del rol (el admin del seed tiene todos).
+
+| Método | Ruta | Permiso | Descripción |
+|--------|------|---------|-------------|
+| `POST` | `/api/auth/login` | — | Login admin (email + contraseña en Firestore). Devuelve JWT. |
+| `GET` | `/api/auth/users` | `usuarios.consultar` | Listado con `page`, `limit`, `rolId`, `estado`, `email`. |
+| `GET` | `/api/auth/users/:id` | `usuarios.consultar` | Detalle de un usuario (admin o estudiante). |
+| `POST` | `/api/auth/users` | `usuarios.crear` | Alta de usuario **administrativo** (`nombre`, `documento`, `email`, `password`, `rolId`). |
+| `PUT` | `/api/auth/users/:id` | `usuarios.actualizar` | Actualización parcial (admin: todos los campos; estudiante: `rolId`, `estado`). |
+| `PATCH` | `/api/auth/users/:id/deshabilitar` | `usuarios.deshabilitar` | Marca `estado: INACTIVO` (en estudiantes también desactiva Firebase Auth). |
+
+**Probar con el admin del seed:**
+
+```http
+POST /api/auth/login
+{ "email": "admin@admin.com", "password": "Admin1234!" }
+```
+
+Usá el `data.token` de la respuesta en el resto de llamadas.
+
+Los estudiantes se crean con `POST /api/auth/register` (Firebase); el CRUD solo **consulta/actualiza/deshabilita** esos perfiles, no los crea por esta vía.
+
 ## Modelo de datos (Firestore)
 
 | Colección | ID de documento | Descripción |
@@ -97,8 +121,10 @@ Los paths y esquemas de **Auth** están definidos en **`src/docs/swagger.ts`** (
 - `src/app.ts` — Express, CORS, Swagger, rutas, errores
 - `lib/firebase.ts` — Firebase Admin (Firestore + **Auth**)
 - `lib/firestoreCollections.ts` — Nombres de colecciones
-- `src/routes/auth.routes.ts` — Rutas `/auth/*`
+- `src/routes/auth.routes.ts` — Rutas `/auth/*` (login, estudiantes, `/auth/users`)
+- `src/routes/users.routes.ts` — CRUD `/auth/users`
 - `src/services/studentAuth.service.ts` — Lógica de registro, sesión y username Google
+- `src/services/usuario.service.ts` — CRUD y login administrativo
 - `src/middlewares/auth.middleware.ts` — JWT interno, permisos, `express-validator`
 - `src/middlewares/firebase-id-token.middleware.ts` — Verificación del **ID token** de Firebase
 - `src/docs/swagger.ts` — Especificación OpenAPI
