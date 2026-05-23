@@ -95,6 +95,11 @@ export async function registerStudentManual(
     });
     firebaseUid = userRecord.uid;
     const newUid = firebaseUid;
+    
+    // ✅ Solo esto, sin validar email_verified en Firestore
+    await auth.setCustomUserClaims(newUid, {
+      institutional: true,
+    });
 
     const userRef = db.collection(collections.usuarios).doc(newUid);
     const now = FieldValue.serverTimestamp();
