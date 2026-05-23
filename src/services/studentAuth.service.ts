@@ -95,6 +95,11 @@ export async function registerStudentManual(
     });
     firebaseUid = userRecord.uid;
     const newUid = firebaseUid;
+    
+    //Agregar claim con el dominio
+    await auth.setCustomUserClaims(newUid, {
+      institutional: true,
+    });
 
     const userRef = db.collection(collections.usuarios).doc(newUid);
     const now = FieldValue.serverTimestamp();
