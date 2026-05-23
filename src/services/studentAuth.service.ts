@@ -96,7 +96,7 @@ export async function registerStudentManual(
     firebaseUid = userRecord.uid;
     const newUid = firebaseUid;
     
-    //Agregar claim con el dominio
+    // ✅ Solo esto, sin validar email_verified en Firestore
     await auth.setCustomUserClaims(newUid, {
       institutional: true,
     });
