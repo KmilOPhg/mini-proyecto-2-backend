@@ -30,6 +30,24 @@ function asStudentRow(data: DocumentData | undefined): StudentUsuarioFirestore |
   return data as StudentUsuarioFirestore;
 }
 
+function requireInstitutionalEmail(email: string | undefined | null): void {
+  const normalized = (email ?? "").trim().toLowerCase();
+  if (!normalized) {
+    throw new AppError("No se pudo verificar el correo de la cuenta.", 400);
+  }
+  if (!isInstitutionalEmail(normalized)) {
+    throw new AppError(
+      "Solo se permiten correos institucionales con dominio autorizado (por ejemplo @universidad.edu.co).",
+      403
+    );
+  }
+}
+
+async function ensureInstitutionalClaim(uid: string, decoded: DecodedIdToken): Promise<void> {
+  if (decoded.institutional === true) return;
+  await getAuth().setCustomUserClaims(uid, { institutional: true });
+}
+
 function mapFirebaseAuthError(err: unknown): never {
   if (err && typeof err === "object" && "code" in err) {
     const code = String((err as { code: string }).code);
@@ -186,7 +204,11 @@ function pickGoogleNames(decoded: DecodedIdToken): { nombres: string; apellidos:
 
 /** `decoded` debe provenir de `verifyIdToken` (p. ej. middleware). */
 export async function resolveSessionForDecoded(decoded: DecodedIdToken): Promise<SessionResult> {
+  requireInstitutionalEmail(decoded.email);
+
   const uid = decoded.uid;
+  await ensureInstitutionalClaim(uid, decoded);
+
   const db = getDb();
   const userRef = db.collection(collections.usuarios).doc(uid);
   let snap = await userRef.get();
@@ -255,7 +277,10 @@ export async function completeGoogleUsernameForDecoded(
     throw new AppError("Este paso solo aplica cuando te autenticaste con Google en esta sesión.", 400);
   }
 
+  requireInstitutionalEmail(decoded.email);
+
   const uid = decoded.uid;
+  await ensureInstitutionalClaim(uid, decoded);
   const norm = parseAndValidateUsername(usernameRaw);
   const db = getDb();
   const userRef = db.collection(collections.usuarios).doc(uid);
