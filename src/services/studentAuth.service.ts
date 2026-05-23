@@ -91,6 +91,7 @@ export async function registerStudentManual(
       password: input.password,
       displayName: displayName || undefined,
       photoURL: input.avatar?.trim() || undefined,
+      emailVerified: true,
     });
     firebaseUid = userRecord.uid;
     const newUid = firebaseUid;
