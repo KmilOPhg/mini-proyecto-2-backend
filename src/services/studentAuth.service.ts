@@ -96,10 +96,9 @@ export async function registerStudentManual(
     firebaseUid = userRecord.uid;
     const newUid = firebaseUid;
     
-    // ✅ Solo esto, sin validar email_verified en Firestore
     await auth.setCustomUserClaims(newUid, {
       institutional: true,
-    });
+    });    
 
     const userRef = db.collection(collections.usuarios).doc(newUid);
     const now = FieldValue.serverTimestamp();
@@ -134,7 +133,10 @@ export async function registerStudentManual(
       tx.set(userRef, row);
     });
 
-    const customToken = await auth.createCustomToken(newUid);
+    const customToken = await auth.createCustomToken(newUid, {
+      institutional: true,
+    });
+    
     const userSnap = await userRef.get();
     const row = asStudentRow(userSnap.data());
     if (!row) throw new AppError("No se pudo leer el perfil recién creado.", 500);
