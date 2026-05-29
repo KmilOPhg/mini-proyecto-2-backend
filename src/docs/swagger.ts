@@ -5,19 +5,34 @@ const options: swaggerJSDoc.Options = {
     openapi: "3.0.0",
     info: {
       title: "mini-proyecto-2-backend API",
-      version: "1.0.0",
-      description: "Documentación de la API de mini-proyecto-2-backend",
+      version: "1.1.0",
+      description:
+        "API REST + Socket.io para mini-proyecto-2. Cubre US-01 a US-07 y base TS-02 (salas, chat, presencia). " +
+        "Swagger UI: `/api-docs`. JSON: `/api-docs.json`.",
     },
     tags: [
       {
         name: "Auth",
         description:
-          "Autenticación estudiantil: Firebase Auth + perfil en Firestore (US-01 a US-03). El JWT del backend se obtiene en `POST /auth/session` o `POST /auth/google/complete-username` cuando el perfil está completo.",
+          "Registro y sesión estudiantil con Firebase (US-01 a US-03). En `POST /auth/session` y `POST /auth/google/complete-username` usar el **Firebase ID token**. El **JWT del backend** (7 días) se devuelve en `data.token` cuando el perfil está completo.",
+      },
+      {
+        name: "Perfil",
+        description:
+          "Perfil del estudiante autenticado (US-04, US-05). Requiere **JWT del backend** (`data.token` tras sesión completa). Rol `estudiante`, estado `ACTIVO`. No requiere permisos `usuarios.*`.",
       },
       {
         name: "Usuarios",
         description:
-          "CRUD de perfiles en Firestore (`usuarios`). Requiere JWT del backend (`POST /auth/login` para admin o sesión estudiantil completa) y permisos `usuarios.*`.",
+          "Administración de usuarios en Firestore. Requiere JWT del backend (`POST /auth/login` para admin) y permisos `usuarios.*`.",
+      },
+      {
+        name: "Salas",
+        description:
+          "Salas de estudio (US-06, US-07) y mensajes (TS-02). JWT del backend, rol `estudiante`. " +
+          "**WebSocket (mismo puerto):** conectar con Socket.io y `auth: { token: '<JWT backend>' }`. " +
+          "Eventos cliente→servidor: `sala:unirse`, `sala:salir`, `mensaje:enviar`. " +
+          "Eventos servidor→cliente: `mensaje:nuevo`, `presencia:actualizada`.",
       },
     ],
     servers: [
@@ -33,7 +48,14 @@ const options: swaggerJSDoc.Options = {
           scheme: "bearer",
           bearerFormat: "JWT",
           description:
-            "Para `POST /auth/session` y `POST /auth/google/complete-username` enviar el **Firebase ID token**. Para rutas que usan `authenticateToken` del backend, el JWT devuelto en `data.token` tras sesión completa.",
+            "JWT del backend (7 días), obtenido en `POST /auth/session` (perfil completo), `POST /auth/google/complete-username` o `POST /auth/login` (admin).",
+        },
+        firebaseIdToken: {
+          type: "http",
+          scheme: "bearer",
+          bearerFormat: "JWT",
+          description:
+            "Firebase ID token del cliente tras `signInWithCustomToken`, email/contraseña o Google. Solo en rutas marcadas explícitamente.",
         },
       },
       schemas: {
@@ -132,6 +154,44 @@ const options: swaggerJSDoc.Options = {
             user: { $ref: "#/components/schemas/StudentUserPublic" },
           },
         },
+        SalaPublica: {
+          type: "object",
+          properties: {
+            id: { type: "string" },
+            nombre: { type: "string" },
+            creadorUid: { type: "string" },
+            participantes: { type: "array", items: { type: "string" } },
+            esCreador: { type: "boolean" },
+            createdAt: { type: "string", format: "date-time", nullable: true },
+            updatedAt: { type: "string", format: "date-time", nullable: true },
+          },
+        },
+        ListarMisSalasData: {
+          type: "object",
+          properties: {
+            items: { type: "array", items: { $ref: "#/components/schemas/SalaPublica" } },
+            total: { type: "integer" },
+            vacio: { type: "boolean" },
+          },
+        },
+        CrearSalaBody: {
+          type: "object",
+          required: ["nombre"],
+          properties: {
+            nombre: { type: "string", minLength: 3, maxLength: 80 },
+          },
+        },
+        MensajePublico: {
+          type: "object",
+          properties: {
+            id: { type: "string" },
+            salaId: { type: "string" },
+            uid: { type: "string" },
+            username: { type: "string" },
+            texto: { type: "string" },
+            createdAt: { type: "string", format: "date-time", nullable: true },
+          },
+        },
         ApiErrorEnvelope: {
           type: "object",
           properties: {
@@ -192,6 +252,29 @@ const options: swaggerJSDoc.Options = {
             password: { type: "string", minLength: 8 },
             rolId: { type: "string" },
             estado: { type: "string", enum: ["ACTIVO", "INACTIVO"] },
+          },
+        },
+        ActualizarMiPerfilBody: {
+          type: "object",
+          description: "Todos los campos son opcionales; enviar solo los que se desean cambiar.",
+          properties: {
+            nombres: { type: "string", maxLength: 120 },
+            apellidos: { type: "string", maxLength: 120 },
+            username: {
+              type: "string",
+              description: "3–30 caracteres: minúsculas, números y guion bajo. 409 si ya está en uso.",
+            },
+            avatar: {
+              type: "string",
+              format: "uri",
+              nullable: true,
+              description: "URL http(s); `null` o vacío para quitar avatar.",
+            },
+            email: {
+              type: "string",
+              format: "email",
+              description: "Dominio institucional si `INSTITUTIONAL_EMAIL_DOMAINS` está configurado. 409 si duplicado.",
+            },
           },
         },
         ListarUsuariosData: {
@@ -320,6 +403,142 @@ const options: swaggerJSDoc.Options = {
             },
             "409": {
               description: "Email o documento duplicado.",
+              content: {
+                "application/json": { schema: { $ref: "#/components/schemas/ApiErrorEnvelope" } },
+              },
+            },
+          },
+        },
+      },
+      "/auth/users/me": {
+        get: {
+          tags: ["Perfil"],
+          summary: "Ver mi perfil (US-04)",
+          description: "Devuelve el perfil del estudiante autenticado (`usuarios/{uid}`).",
+          security: [{ bearerAuth: [] }],
+          responses: {
+            "200": {
+              description: "Perfil obtenido.",
+              content: {
+                "application/json": {
+                  schema: {
+                    allOf: [
+                      { $ref: "#/components/schemas/ApiSuccessEnvelope" },
+                      {
+                        type: "object",
+                        properties: { data: { $ref: "#/components/schemas/UsuarioPublico" } },
+                      },
+                    ],
+                  },
+                },
+              },
+            },
+            "401": {
+              description: "Token ausente o inválido.",
+              content: {
+                "application/json": { schema: { $ref: "#/components/schemas/ApiErrorEnvelope" } },
+              },
+            },
+            "403": {
+              description: "No es estudiante o cuenta inactiva.",
+              content: {
+                "application/json": { schema: { $ref: "#/components/schemas/ApiErrorEnvelope" } },
+              },
+            },
+            "404": {
+              description: "Perfil no encontrado.",
+              content: {
+                "application/json": { schema: { $ref: "#/components/schemas/ApiErrorEnvelope" } },
+              },
+            },
+          },
+        },
+        put: {
+          tags: ["Perfil"],
+          summary: "Editar mi perfil (US-04)",
+          description:
+            "Actualiza Firestore, reserva de `usernames` (transacción) y sincroniza Firebase Auth (`displayName`, `photoURL`, `email`).",
+          security: [{ bearerAuth: [] }],
+          requestBody: {
+            required: true,
+            content: {
+              "application/json": {
+                schema: { $ref: "#/components/schemas/ActualizarMiPerfilBody" },
+              },
+            },
+          },
+          responses: {
+            "200": {
+              description: "Perfil actualizado.",
+              content: {
+                "application/json": {
+                  schema: {
+                    allOf: [
+                      { $ref: "#/components/schemas/ApiSuccessEnvelope" },
+                      {
+                        type: "object",
+                        properties: { data: { $ref: "#/components/schemas/UsuarioPublico" } },
+                      },
+                    ],
+                  },
+                },
+              },
+            },
+            "400": {
+              description: "Validación o sin campos para actualizar.",
+              content: {
+                "application/json": { schema: { $ref: "#/components/schemas/ApiErrorEnvelope" } },
+              },
+            },
+            "401": {
+              description: "Token ausente o inválido.",
+              content: {
+                "application/json": { schema: { $ref: "#/components/schemas/ApiErrorEnvelope" } },
+              },
+            },
+            "403": {
+              description: "No es estudiante o cuenta inactiva.",
+              content: {
+                "application/json": { schema: { $ref: "#/components/schemas/ApiErrorEnvelope" } },
+              },
+            },
+            "409": {
+              description: "Username o correo ya registrado.",
+              content: {
+                "application/json": { schema: { $ref: "#/components/schemas/ApiErrorEnvelope" } },
+              },
+            },
+          },
+        },
+        delete: {
+          tags: ["Perfil"],
+          summary: "Eliminar mi cuenta (US-05)",
+          description:
+            "Borra el documento en `usuarios`, libera `usernames` y elimina el usuario en Firebase Auth. El cliente debe cerrar sesión y redirigir al login.",
+          security: [{ bearerAuth: [] }],
+          responses: {
+            "200": {
+              description: "Cuenta eliminada (`data` es null).",
+              content: {
+                "application/json": {
+                  schema: { $ref: "#/components/schemas/ApiSuccessEnvelope" },
+                },
+              },
+            },
+            "401": {
+              description: "Token ausente o inválido.",
+              content: {
+                "application/json": { schema: { $ref: "#/components/schemas/ApiErrorEnvelope" } },
+              },
+            },
+            "403": {
+              description: "No es estudiante.",
+              content: {
+                "application/json": { schema: { $ref: "#/components/schemas/ApiErrorEnvelope" } },
+              },
+            },
+            "404": {
+              description: "Perfil no encontrado.",
               content: {
                 "application/json": { schema: { $ref: "#/components/schemas/ApiErrorEnvelope" } },
               },
@@ -512,7 +731,7 @@ const options: swaggerJSDoc.Options = {
           summary: "Resolver sesión tras login con Firebase (US-02, US-03)",
           description:
             "Cabecera obligatoria: `Authorization: Bearer <Firebase ID token>`. Si es el primer acceso con Google, crea un perfil incompleto y devuelve `needsUsername: true` sin JWT de backend. Si el perfil está completo (username asignado), devuelve `needsUsername: false` y `token` (JWT) para el resto de la API.",
-          security: [{ bearerAuth: [] }],
+          security: [{ firebaseIdToken: [] }],
           responses: {
             "200": {
               description: "Estado de sesión y perfil.",
@@ -559,7 +778,7 @@ const options: swaggerJSDoc.Options = {
           summary: "Completar username tras Google (US-02)",
           description:
             "Requiere `Authorization: Bearer <Firebase ID token>` de una sesión iniciada con Google. Completa el perfil y devuelve el JWT del backend.",
-          security: [{ bearerAuth: [] }],
+          security: [{ firebaseIdToken: [] }],
           requestBody: {
             required: true,
             content: {
@@ -607,6 +826,297 @@ const options: swaggerJSDoc.Options = {
             },
             "409": {
               description: "Nombre de usuario ya ocupado.",
+              content: {
+                "application/json": { schema: { $ref: "#/components/schemas/ApiErrorEnvelope" } },
+              },
+            },
+          },
+        },
+      },
+      "/salas/mias": {
+        get: {
+          tags: ["Salas"],
+          summary: "Listar mis salas (US-06)",
+          description:
+            "Salas donde el usuario autenticado es `creadorUid`. Si `data.vacio` es true, el mensaje de la API invita a crear la primera sala.",
+          security: [{ bearerAuth: [] }],
+          responses: {
+            "200": {
+              description: "Dashboard de salas propias.",
+              content: {
+                "application/json": {
+                  schema: {
+                    allOf: [
+                      { $ref: "#/components/schemas/ApiSuccessEnvelope" },
+                      {
+                        type: "object",
+                        properties: { data: { $ref: "#/components/schemas/ListarMisSalasData" } },
+                      },
+                    ],
+                  },
+                },
+              },
+            },
+            "401": {
+              description: "Token ausente o inválido.",
+              content: {
+                "application/json": { schema: { $ref: "#/components/schemas/ApiErrorEnvelope" } },
+              },
+            },
+            "403": {
+              description: "No es estudiante o cuenta inactiva.",
+              content: {
+                "application/json": { schema: { $ref: "#/components/schemas/ApiErrorEnvelope" } },
+              },
+            },
+          },
+        },
+      },
+      "/salas": {
+        post: {
+          tags: ["Salas"],
+          summary: "Crear sala (US-06)",
+          description:
+            "Genera un ID único en Firestore. El creador queda en `participantes` y `esCreador: true` en la respuesta.",
+          security: [{ bearerAuth: [] }],
+          requestBody: {
+            required: true,
+            content: {
+              "application/json": { schema: { $ref: "#/components/schemas/CrearSalaBody" } },
+            },
+          },
+          responses: {
+            "201": {
+              description: "Sala creada.",
+              content: {
+                "application/json": {
+                  schema: {
+                    allOf: [
+                      { $ref: "#/components/schemas/ApiSuccessEnvelope" },
+                      {
+                        type: "object",
+                        properties: { data: { $ref: "#/components/schemas/SalaPublica" } },
+                      },
+                    ],
+                  },
+                },
+              },
+            },
+            "400": {
+              description: "Nombre inválido (3–80 caracteres).",
+              content: {
+                "application/json": { schema: { $ref: "#/components/schemas/ApiErrorEnvelope" } },
+              },
+            },
+            "401": {
+              description: "Token ausente o inválido.",
+              content: {
+                "application/json": { schema: { $ref: "#/components/schemas/ApiErrorEnvelope" } },
+              },
+            },
+            "403": {
+              description: "No es estudiante.",
+              content: {
+                "application/json": { schema: { $ref: "#/components/schemas/ApiErrorEnvelope" } },
+              },
+            },
+          },
+        },
+      },
+      "/salas/{id}": {
+        get: {
+          tags: ["Salas"],
+          summary: "Obtener sala",
+          description: "Acceso para creador o participante. Incluye `esCreador` para UI (US-07).",
+          security: [{ bearerAuth: [] }],
+          parameters: [{ name: "id", in: "path", required: true, schema: { type: "string" } }],
+          responses: {
+            "200": {
+              description: "Detalle de sala.",
+              content: {
+                "application/json": {
+                  schema: {
+                    allOf: [
+                      { $ref: "#/components/schemas/ApiSuccessEnvelope" },
+                      {
+                        type: "object",
+                        properties: { data: { $ref: "#/components/schemas/SalaPublica" } },
+                      },
+                    ],
+                  },
+                },
+              },
+            },
+            "403": {
+              description: "Sin acceso a la sala.",
+              content: {
+                "application/json": { schema: { $ref: "#/components/schemas/ApiErrorEnvelope" } },
+              },
+            },
+            "404": {
+              description: "Sala no encontrada.",
+              content: {
+                "application/json": { schema: { $ref: "#/components/schemas/ApiErrorEnvelope" } },
+              },
+            },
+          },
+        },
+        put: {
+          tags: ["Salas"],
+          summary: "Editar nombre de sala (US-07)",
+          description: "Solo el `creadorUid` puede editar. Participantes reciben 403.",
+          security: [{ bearerAuth: [] }],
+          parameters: [{ name: "id", in: "path", required: true, schema: { type: "string" } }],
+          requestBody: {
+            required: true,
+            content: {
+              "application/json": { schema: { $ref: "#/components/schemas/CrearSalaBody" } },
+            },
+          },
+          responses: {
+            "200": {
+              description: "Sala actualizada.",
+              content: {
+                "application/json": {
+                  schema: {
+                    allOf: [
+                      { $ref: "#/components/schemas/ApiSuccessEnvelope" },
+                      {
+                        type: "object",
+                        properties: { data: { $ref: "#/components/schemas/SalaPublica" } },
+                      },
+                    ],
+                  },
+                },
+              },
+            },
+            "400": {
+              description: "Nombre inválido.",
+              content: {
+                "application/json": { schema: { $ref: "#/components/schemas/ApiErrorEnvelope" } },
+              },
+            },
+            "403": {
+              description: "Solo el creador puede editar.",
+              content: {
+                "application/json": { schema: { $ref: "#/components/schemas/ApiErrorEnvelope" } },
+              },
+            },
+            "404": {
+              description: "Sala no encontrada.",
+              content: {
+                "application/json": { schema: { $ref: "#/components/schemas/ApiErrorEnvelope" } },
+              },
+            },
+          },
+        },
+        delete: {
+          tags: ["Salas"],
+          summary: "Eliminar sala (US-07)",
+          description: "Elimina la sala y todos los mensajes de la subcolección. Solo el creador.",
+          security: [{ bearerAuth: [] }],
+          parameters: [{ name: "id", in: "path", required: true, schema: { type: "string" } }],
+          responses: {
+            "200": {
+              description: "Sala eliminada (`data` es null).",
+              content: {
+                "application/json": {
+                  schema: { $ref: "#/components/schemas/ApiSuccessEnvelope" },
+                },
+              },
+            },
+            "403": {
+              description: "Solo el creador puede eliminar.",
+              content: {
+                "application/json": { schema: { $ref: "#/components/schemas/ApiErrorEnvelope" } },
+              },
+            },
+            "404": {
+              description: "Sala no encontrada.",
+              content: {
+                "application/json": { schema: { $ref: "#/components/schemas/ApiErrorEnvelope" } },
+              },
+            },
+          },
+        },
+      },
+      "/salas/{id}/unirse": {
+        post: {
+          tags: ["Salas"],
+          summary: "Unirse a sala por ID (TS-02)",
+          description: "Valida que la sala exista y agrega el UID a `participantes` si aún no tiene acceso.",
+          security: [{ bearerAuth: [] }],
+          parameters: [{ name: "id", in: "path", required: true, schema: { type: "string" } }],
+          responses: {
+            "200": {
+              description: "Unión exitosa (o ya era participante).",
+              content: {
+                "application/json": {
+                  schema: {
+                    allOf: [
+                      { $ref: "#/components/schemas/ApiSuccessEnvelope" },
+                      {
+                        type: "object",
+                        properties: { data: { $ref: "#/components/schemas/SalaPublica" } },
+                      },
+                    ],
+                  },
+                },
+              },
+            },
+            "404": {
+              description: "Sala no encontrada.",
+              content: {
+                "application/json": { schema: { $ref: "#/components/schemas/ApiErrorEnvelope" } },
+              },
+            },
+          },
+        },
+      },
+      "/salas/{id}/mensajes": {
+        get: {
+          tags: ["Salas"],
+          summary: "Historial de mensajes (TS-02)",
+          description: "Últimos mensajes ordenados por antigüedad ascendente. Por defecto `limit=50`.",
+          security: [{ bearerAuth: [] }],
+          parameters: [
+            { name: "id", in: "path", required: true, schema: { type: "string" } },
+            {
+              name: "limit",
+              in: "query",
+              schema: { type: "integer", minimum: 1, maximum: 100, default: 50 },
+            },
+          ],
+          responses: {
+            "200": {
+              description: "Mensajes recientes.",
+              content: {
+                "application/json": {
+                  schema: {
+                    allOf: [
+                      { $ref: "#/components/schemas/ApiSuccessEnvelope" },
+                      {
+                        type: "object",
+                        properties: {
+                          data: {
+                            type: "array",
+                            items: { $ref: "#/components/schemas/MensajePublico" },
+                          },
+                        },
+                      },
+                    ],
+                  },
+                },
+              },
+            },
+            "403": {
+              description: "Sin acceso a la sala.",
+              content: {
+                "application/json": { schema: { $ref: "#/components/schemas/ApiErrorEnvelope" } },
+              },
+            },
+            "404": {
+              description: "Sala no encontrada.",
               content: {
                 "application/json": { schema: { $ref: "#/components/schemas/ApiErrorEnvelope" } },
               },

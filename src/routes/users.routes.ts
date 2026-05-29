@@ -1,13 +1,25 @@
 import { Router } from "express";
 import {
+  actualizarMiPerfilController,
   actualizarUsuarioController,
   crearUsuarioController,
   deshabilitarUsuarioController,
+  eliminarMiCuentaController,
   listarUsuariosController,
+  obtenerMiPerfilController,
   obtenerUsuarioController,
 } from "../controllers/usuario.controller.js";
 
 const router = Router();
+
+// GET /api/auth/users/me (US-04)
+router.get("/me", obtenerMiPerfilController);
+
+// PUT /api/auth/users/me (US-04)
+router.put("/me", actualizarMiPerfilController);
+
+// DELETE /api/auth/users/me (US-05)
+router.delete("/me", eliminarMiCuentaController);
 
 // GET /api/auth/users
 router.get("/", listarUsuariosController);

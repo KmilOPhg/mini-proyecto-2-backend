@@ -70,3 +70,12 @@ export type LoginAdminResultado = {
   token: string;
   user: UsuarioPublico;
 };
+
+// Actualización de perfil del estudiante autenticado (US-04)
+export type EstudiantePerfilUpdate = Partial<{
+  nombres: string;
+  apellidos: string;
+  username: string;
+  avatar: string | null;
+  email: string;
+}>;

@@ -1,0 +1,54 @@
+rules_version = '2';
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    function autenticado() {
+      return request.auth != null;
+    }
+
+    function esPropietario(userId) {
+      return autenticado() && request.auth.uid == userId;
+    }
+
+    function puedeLeerSala(salaId) {
+      let sala = get(/databases/$(database)/documents/salas/$(salaId)).data;
+      return autenticado()
+        && (sala.creadorUid == request.auth.uid
+            || request.auth.uid in sala.participantes);
+    }
+
+    // Catálogos y reservas de username: solo backend
+    match /roles/{id} {
+      allow read, write: if false;
+    }
+    match /permisos/{id} {
+      allow read, write: if false;
+    }
+    match /rolPermisos/{id} {
+      allow read, write: if false;
+    }
+    match /usernames/{username} {
+      allow read, write: if false;
+    }
+
+    // Perfil estudiante: id del documento = Firebase Auth UID
+    match /usuarios/{userId} {
+      allow read: if esPropietario(userId);
+      allow write: if false;
+    }
+
+    // Salas de estudio
+    match /salas/{salaId} {
+      allow read: if autenticado()
+        && (resource.data.creadorUid == request.auth.uid
+            || request.auth.uid in resource.data.participantes);
+      allow write: if false;
+
+      match /mensajes/{mensajeId} {
+        allow read: if puedeLeerSala(salaId);
+        allow write: if false;
+      }
+    }
+  }
+}
