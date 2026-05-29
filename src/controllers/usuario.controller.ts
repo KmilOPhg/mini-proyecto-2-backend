@@ -10,6 +10,7 @@ import {
 import { sendSuccessResponse } from "../utils/JSONResponse.js";
 import * as usuarioService from "../services/usuario.service.js";
 import type { EstadoUsuario } from "../types/usuario.types.js";
+import { requireEstudianteUid } from "../middlewares/estudiante.middleware.js";
 
 const passwordRules = body("password")
   .isLength({ min: 8 })
@@ -119,6 +120,59 @@ export const actualizarUsuarioController = [
       estado: req.body.estado !== undefined ? (req.body.estado as EstadoUsuario) : undefined,
     });
     sendSuccessResponse(res, 200, "Usuario actualizado correctamente.", data);
+  }),
+];
+
+// Obtener perfil del estudiante autenticado (US-04)
+export const obtenerMiPerfilController = [
+  authenticateToken,
+  asyncWrapper(async (req: AuthenticatedRequest, res: Response) => {
+    const uid = requireEstudianteUid(req);
+    const data = await usuarioService.obtenerMiPerfilEstudiante(uid);
+    sendSuccessResponse(res, 200, "Perfil obtenido correctamente.", data);
+  }),
+];
+
+// Actualizar perfil del estudiante autenticado (US-04)
+export const actualizarMiPerfilController = [
+  authenticateToken,
+  body("nombres").optional().trim().notEmpty().isLength({ max: 120 }),
+  body("apellidos").optional().trim().notEmpty().isLength({ max: 120 }),
+  body("username").optional().trim().notEmpty(),
+  body("email").optional().trim().isEmail().normalizeEmail(),
+  body("avatar")
+    .optional({ values: "null", checkFalsy: true })
+    .isString()
+    .isURL({ protocols: ["http", "https"], require_protocol: true })
+    .withMessage("El avatar debe ser una URL http(s) válida."),
+  validateRequest,
+  asyncWrapper(async (req: AuthenticatedRequest, res: Response) => {
+    const uid = requireEstudianteUid(req);
+    const avatar =
+      req.body.avatar === undefined
+        ? undefined
+        : req.body.avatar === null || String(req.body.avatar).trim() === ""
+          ? null
+          : String(req.body.avatar).trim();
+
+    const data = await usuarioService.actualizarPerfilEstudiante(uid, {
+      nombres: req.body.nombres !== undefined ? String(req.body.nombres) : undefined,
+      apellidos: req.body.apellidos !== undefined ? String(req.body.apellidos) : undefined,
+      username: req.body.username !== undefined ? String(req.body.username) : undefined,
+      email: req.body.email !== undefined ? String(req.body.email) : undefined,
+      avatar,
+    });
+    sendSuccessResponse(res, 200, "Perfil actualizado correctamente.", data);
+  }),
+];
+
+// Eliminar cuenta del estudiante autenticado (US-05)
+export const eliminarMiCuentaController = [
+  authenticateToken,
+  asyncWrapper(async (req: AuthenticatedRequest, res: Response) => {
+    const uid = requireEstudianteUid(req);
+    await usuarioService.eliminarCuentaEstudiante(uid);
+    sendSuccessResponse(res, 200, "Cuenta eliminada correctamente.", null);
   }),
 ];
 

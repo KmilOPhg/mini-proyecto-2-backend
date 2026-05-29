@@ -4,6 +4,7 @@ import { getAuth, getDb } from "../../lib/firebase.js";
 import { collections } from "../../lib/firestoreCollections.js";
 import type {
   EstadoUsuario,
+  EstudiantePerfilUpdate,
   ListarUsuariosFiltros,
   ListarUsuariosResultado,
   LoginAdminInput,
@@ -14,7 +15,9 @@ import type {
   UsuarioPublico,
 } from "../types/usuario.types.js";
 import { AppError } from "../utils/AppError.js";
+import { isInstitutionalEmail } from "../utils/institutionalEmail.js";
 import { signStudentSessionJwt } from "../utils/studentJwt.js";
+import { parseAndValidateUsername } from "../utils/username.js";
 
 const SALT_ROUNDS = 10;
 const DEFAULT_PAGE = 1;
@@ -94,6 +97,30 @@ async function asegurarCampoUnico(
   if (excluirId && docId === excluirId) return;
   const etiqueta = campo === "email" ? "correo" : "documento";
   throw new AppError(`El ${etiqueta} ya está registrado.`, 409);
+}
+
+// Validar que el username no esté reservado por otro estudiante
+async function asegurarUsernameDisponible(username: string, excluirUid: string): Promise<void> {
+  const ref = getDb().collection(collections.usernames).doc(username);
+  const snap = await ref.get();
+  if (!snap.exists) return;
+  const owner = snap.data()?.uid as string | undefined;
+  if (owner === excluirUid) return;
+  throw new AppError("Este nombre de usuario ya está en uso.", 409);
+}
+
+function mapFirebaseAuthError(err: unknown): never {
+  if (err && typeof err === "object" && "code" in err) {
+    const code = String((err as { code: string }).code);
+    const map: Record<string, { status: number; msg: string }> = {
+      "auth/email-already-exists": { status: 409, msg: "El correo electrónico ya está registrado." },
+      "auth/invalid-email": { status: 400, msg: "El formato del correo electrónico no es válido." },
+    };
+    const m = map[code];
+    if (m) throw new AppError(m.msg, m.status);
+  }
+  const msg = err instanceof Error ? err.message : "Error al comunicarse con Firebase Auth";
+  throw new AppError(msg, 500);
 }
 
 async function obtenerDocumentoUsuario(id: string) {
@@ -263,6 +290,160 @@ export async function actualizarUsuario(id: string, input: UsuarioAdminUpdate): 
   await ref.update(patch);
   const updated = await ref.get();
   return toPublico(id, updated.data()!);
+}
+
+// Obtener perfil del estudiante autenticado (US-04)
+export async function obtenerMiPerfilEstudiante(uid: string): Promise<UsuarioPublico> {
+  const { data } = await obtenerDocumentoUsuario(uid);
+  if (!esEstudiante(data)) {
+    throw new AppError("Solo los estudiantes pueden acceder a este perfil.", 403);
+  }
+  return toPublico(uid, data);
+}
+
+// Actualizar perfil del estudiante autenticado (US-04)
+export async function actualizarPerfilEstudiante(
+  uid: string,
+  input: EstudiantePerfilUpdate
+): Promise<UsuarioPublico> {
+  const db = getDb();
+  const userRef = db.collection(collections.usuarios).doc(uid);
+  const userSnap = await userRef.get();
+  if (!userSnap.exists) {
+    throw new AppError("Usuario no encontrado.", 404);
+  }
+  const data = userSnap.data()!;
+  if (!esEstudiante(data)) {
+    throw new AppError("Solo los estudiantes pueden actualizar este perfil.", 403);
+  }
+  if (resolverEstado(data) !== "ACTIVO") {
+    throw new AppError("Tu cuenta está inactiva. Contactá a soporte.", 403);
+  }
+
+  const patch: Record<string, unknown> = {};
+  let nuevoUsername: string | undefined;
+  const usernameAnterior =
+    typeof data.usernameNormalized === "string"
+      ? data.usernameNormalized
+      : typeof data.username === "string"
+        ? data.username
+        : null;
+
+  if (input.nombres !== undefined) patch.nombres = input.nombres.trim();
+  if (input.apellidos !== undefined) patch.apellidos = input.apellidos.trim();
+  if (input.avatar !== undefined) patch.avatar = input.avatar?.trim() || null;
+
+  if (input.username !== undefined) {
+    nuevoUsername = parseAndValidateUsername(input.username);
+    if (nuevoUsername !== usernameAnterior) {
+      await asegurarUsernameDisponible(nuevoUsername, uid);
+      patch.username = nuevoUsername;
+      patch.usernameNormalized = nuevoUsername;
+    }
+  }
+
+  if (input.email !== undefined) {
+    const email = input.email.trim().toLowerCase();
+    if (!isInstitutionalEmail(email)) {
+      throw new AppError(
+        "El correo no pertenece a un dominio institucional permitido.",
+        400
+      );
+    }
+    const emailActual = String(data.email ?? "").trim().toLowerCase();
+    if (email !== emailActual) {
+      await asegurarCampoUnico("email", email, uid);
+      patch.email = email;
+    }
+  }
+
+  if (Object.keys(patch).length === 0) {
+    throw new AppError("No hay campos para actualizar.", 400);
+  }
+
+  patch.updatedAt = FieldValue.serverTimestamp();
+
+  const usernameRef =
+    nuevoUsername && nuevoUsername !== usernameAnterior
+      ? db.collection(collections.usernames).doc(nuevoUsername)
+      : null;
+  const usernameAnteriorRef = usernameAnterior
+    ? db.collection(collections.usernames).doc(usernameAnterior)
+    : null;
+
+  await db.runTransaction(async (tx) => {
+    if (nuevoUsername && nuevoUsername !== usernameAnterior && usernameRef) {
+      const unSnap = await tx.get(usernameRef);
+      if (unSnap.exists) {
+        const owner = unSnap.data()?.uid as string | undefined;
+        if (owner !== uid) {
+          throw new AppError("Este nombre de usuario ya está en uso.", 409);
+        }
+      }
+      tx.set(usernameRef, { uid });
+      if (usernameAnteriorRef && usernameAnterior !== nuevoUsername) {
+        tx.delete(usernameAnteriorRef);
+      }
+    }
+    tx.update(userRef, patch);
+  });
+
+  const authPatch: { email?: string; displayName?: string; photoURL?: string | null } = {};
+  if (typeof patch.email === "string") authPatch.email = patch.email;
+  if (patch.nombres !== undefined || patch.apellidos !== undefined) {
+    const nombres = typeof patch.nombres === "string" ? patch.nombres : String(data.nombres ?? "");
+    const apellidos = typeof patch.apellidos === "string" ? patch.apellidos : String(data.apellidos ?? "");
+    authPatch.displayName = `${nombres} ${apellidos}`.trim() || undefined;
+  }
+  if (patch.avatar !== undefined) {
+    authPatch.photoURL = patch.avatar === null ? null : String(patch.avatar);
+  }
+
+  if (Object.keys(authPatch).length > 0) {
+    try {
+      await getAuth().updateUser(uid, authPatch);
+    } catch (err) {
+      mapFirebaseAuthError(err);
+    }
+  }
+
+  const updated = await userRef.get();
+  return toPublico(uid, updated.data()!);
+}
+
+// Eliminar cuenta del estudiante autenticado (US-05)
+export async function eliminarCuentaEstudiante(uid: string): Promise<void> {
+  const db = getDb();
+  const userRef = db.collection(collections.usuarios).doc(uid);
+  const userSnap = await userRef.get();
+  if (!userSnap.exists) {
+    throw new AppError("Usuario no encontrado.", 404);
+  }
+  const data = userSnap.data()!;
+  if (!esEstudiante(data)) {
+    throw new AppError("Solo los estudiantes pueden eliminar esta cuenta.", 403);
+  }
+
+  const username =
+    typeof data.usernameNormalized === "string"
+      ? data.usernameNormalized
+      : typeof data.username === "string"
+        ? data.username
+        : null;
+  const usernameRef = username ? db.collection(collections.usernames).doc(username) : null;
+
+  await db.runTransaction(async (tx) => {
+    if (usernameRef) {
+      tx.delete(usernameRef);
+    }
+    tx.delete(userRef);
+  });
+
+  try {
+    await getAuth().deleteUser(uid);
+  } catch (err) {
+    mapFirebaseAuthError(err);
+  }
 }
 
 // Deshabilitar usuario (estado INACTIVO); en estudiantes también desactiva Firebase Auth

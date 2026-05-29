@@ -87,6 +87,51 @@ Usá el `data.token` de la respuesta en el resto de llamadas.
 
 Los estudiantes se crean con `POST /api/auth/register` (Firebase); el CRUD solo **consulta/actualiza/deshabilita** esos perfiles, no los crea por esta vía.
 
+## Perfil del estudiante (US-04, US-05)
+
+Rutas bajo **`/api/auth/users/me`**. Requieren JWT del backend (sesión estudiantil completa).
+
+| Método | Ruta | Descripción |
+|--------|------|-------------|
+| `GET` | `/api/auth/users/me` | Ver perfil propio |
+| `PUT` | `/api/auth/users/me` | Editar `nombres`, `apellidos`, `username`, `avatar`, `email` |
+| `DELETE` | `/api/auth/users/me` | Eliminar cuenta (Firestore + Firebase Auth) |
+
+## Salas de estudio (US-06, US-07, TS-02)
+
+Rutas bajo **`/api/salas`**. Requieren JWT del backend de sesión estudiantil (`rolId: estudiante`).
+
+| Método | Ruta | Descripción |
+|--------|------|-------------|
+| `GET` | `/api/salas/mias` | Dashboard: salas creadas por el anfitrión |
+| `POST` | `/api/salas` | Crear sala (`{ "nombre" }`); devuelve ID único |
+| `GET` | `/api/salas/:id` | Detalle (creador o participante) |
+| `PUT` | `/api/salas/:id` | Editar nombre (**solo creador**) |
+| `DELETE` | `/api/salas/:id` | Eliminar sala y mensajes (**solo creador**) |
+| `POST` | `/api/salas/:id/unirse` | Unirse validando que exista el ID |
+| `GET` | `/api/salas/:id/mensajes` | Historial reciente (`?limit=50`) |
+
+### WebSocket (Socket.io)
+
+Mismo host/puerto que la API REST. Autenticación en el handshake:
+
+```javascript
+io("http://localhost:1206", {
+  auth: { token: "<JWT del backend>" },
+});
+```
+
+| Evento (cliente → servidor) | Descripción |
+|-----------------------------|-------------|
+| `sala:unirse` | `{ salaId }` — entra al canal en tiempo real |
+| `sala:salir` | `{ salaId }` — sale del canal |
+| `mensaje:enviar` | `{ salaId, texto }` — guarda en Firestore y emite al resto |
+
+| Evento (servidor → cliente) | Descripción |
+|-----------------------------|-------------|
+| `mensaje:nuevo` | Mensaje persistido |
+| `presencia:actualizada` | `{ salaId, usuarios[] }` — quién está conectado |
+
 ## Modelo de datos (Firestore)
 
 | Colección | ID de documento | Descripción |
@@ -96,6 +141,8 @@ Los estudiantes se crean con `POST /api/auth/register` (Firebase); el CRUD solo 
 | `rolPermisos` | `admin__usuarios.crear`, … | Enlaces rol ↔ permiso. |
 | `usuarios` | **Firebase UID** (estudiantes) o `seed-admin` (demo) | Estudiante: `firebaseUid`, `nombres`, `apellidos`, `username`, `avatar`, `email`, `rolId`, `profileComplete`, `authProviders`, etc. Admin seed: `passwordHash`, `documento`, sin Firebase. |
 | `usernames` | Username **normalizado** (minúsculas) | Documento `{ uid }` apuntando al UID de Firebase; garantiza unicidad. |
+| `salas` | ID autogenerado | `nombre`, `creadorUid`, `participantes[]`, timestamps. |
+| `salas/{id}/mensajes` | ID autogenerado | `uid`, `username`, `texto`, `createdAt`. |
 
 El JWT del backend (`authenticateToken`) usa **`rolId`** como id del documento en `roles` e **`id`** como id del documento en `usuarios` (para estudiantes coincide con el **UID de Firebase**).
 
@@ -125,6 +172,8 @@ Los paths y esquemas de **Auth** están definidos en **`src/docs/swagger.ts`** (
 - `src/routes/users.routes.ts` — CRUD `/auth/users`
 - `src/services/studentAuth.service.ts` — Lógica de registro, sesión y username Google
 - `src/services/usuario.service.ts` — CRUD y login administrativo
+- `src/services/sala.service.ts` — Salas, mensajes y acceso
+- `src/socket/index.ts` — Socket.io (presencia y chat en tiempo real)
 - `src/middlewares/auth.middleware.ts` — JWT interno, permisos, `express-validator`
 - `src/middlewares/firebase-id-token.middleware.ts` — Verificación del **ID token** de Firebase
 - `src/docs/swagger.ts` — Especificación OpenAPI
