@@ -132,6 +132,41 @@ io("http://localhost:1206", {
 | `mensaje:nuevo` | Mensaje persistido |
 | `presencia:actualizada` | `{ salaId, usuarios[] }` — quién está conectado |
 
+## Reglas de seguridad Firestore (criterio C4)
+
+El archivo **`firestore.rules`** en la raíz del repo define quién puede leer/escribir desde el **cliente** (SDK web). Las **escrituras** de negocio (registro, perfil, salas, mensajes) las hace el **backend** con Admin SDK y no dependen de estas reglas.
+
+| Colección | Cliente autenticado |
+|-----------|-------------------|
+| `usuarios/{uid}` | Solo **lectura** de su propio documento (`uid` = `request.auth.uid`) |
+| `salas`, `mensajes` | **Lectura** si es creador o está en `participantes` |
+| `roles`, `permisos`, `rolPermisos`, `usernames` | Denegado (solo API) |
+
+### Publicar reglas (elige una opción)
+
+**Opción A — Consola (rápida)**
+
+1. [Firebase Console](https://console.firebase.google.com/) → proyecto **crossflow-bbbc0** → **Firestore Database** → pestaña **Reglas**.
+2. Copia el contenido de `firestore.rules` del repo y pégalo en el editor.
+3. Pulsa **Publicar**.
+
+**Opción B — Firebase CLI**
+
+```bash
+npm install -g firebase-tools
+firebase login
+cd mini-proyecto-2-backend
+firebase deploy --only firestore:rules
+```
+
+El proyecto por defecto está en `.firebaserc` (`crossflow-bbbc0`). Si usás otro proyecto: `firebase use <project-id>`.
+
+### Evidencia para la rúbrica (PR / informe)
+
+- Enlace al archivo `firestore.rules` en el repositorio.
+- Captura de la consola con las reglas **publicadas** y fecha.
+- Nota: el frontend debe usar **`/api`** y Socket.io; si lee Firestore directo sin estar logueado en Firebase Auth, verá `permission-denied` (esperado).
+
 ## Modelo de datos (Firestore)
 
 | Colección | ID de documento | Descripción |
