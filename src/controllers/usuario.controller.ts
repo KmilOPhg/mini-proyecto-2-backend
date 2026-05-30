@@ -12,6 +12,7 @@ import * as usuarioService from "../services/usuario.service.js";
 import type { EstadoUsuario } from "../types/usuario.types.js";
 import { requireEstudianteUid } from "../middlewares/estudiante.middleware.js";
 import { signStudentSessionJwt } from "../utils/studentJwt.js";
+import { logAuthSesionInicio } from "../utils/authLogger.js";
 
 const passwordRules = body("password")
   .isLength({ min: 8 })
@@ -29,6 +30,11 @@ export const loginAdminController = [
       email: String(req.body.email),
       password: String(req.body.password),
     });
+    logAuthSesionInicio(
+      result.user.id,
+      result.user.nombre ?? result.user.email,
+      result.user.email
+    );
     sendSuccessResponse(res, 200, "Sesión iniciada correctamente.", result);
   }),
 ];
