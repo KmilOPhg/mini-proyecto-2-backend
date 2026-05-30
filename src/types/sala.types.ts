@@ -1,11 +1,17 @@
 import type { Timestamp } from "firebase-admin/firestore";
 
+export type PrivacidadSala = "publica" | "enlace";
+
 // Documento de sala en Firestore (`salas/{id}`)
 export type SalaFirestore = {
   nombre: string;
   creadorUid: string;
   participantes: string[];
   codigoInvitacion?: string;
+  aforoMaximo: number;
+  privacidad: PrivacidadSala;
+  materia?: string;
+  descripcion?: string;
   createdAt?: Timestamp;
   updatedAt?: Timestamp;
 };
@@ -17,10 +23,23 @@ export type SalaPublica = {
   creadorUid: string;
   participantes: string[];
   codigoInvitacion: string | null;
+  aforoMaximo: number;
+  privacidad: PrivacidadSala;
+  materia: string | null;
+  descripcion: string | null;
   esCreador: boolean;
   usuariosEnLinea: number;
   createdAt: string | null;
   updatedAt: string | null;
+};
+
+export type CrearSalaInput = {
+  nombre: string;
+  codigoInvitacion?: string;
+  aforoMaximo?: number;
+  privacidad?: PrivacidadSala;
+  materia?: string;
+  descripcion?: string;
 };
 
 // Resultado del dashboard de salas propias (US-06)
