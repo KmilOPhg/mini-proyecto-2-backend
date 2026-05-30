@@ -1,4 +1,5 @@
 import type { Server as HttpServer } from "node:http";
+import colors from "colors";
 import { Server, type Socket } from "socket.io";
 import * as salaService from "../services/sala.service.js";
 import { AppError } from "../utils/AppError.js";
@@ -62,6 +63,20 @@ function obtenerErrorMensaje(err: unknown): string {
   return "Error inesperado en el servidor.";
 }
 
+function logUsuarioSala(
+  accion: "conectó" | "desconectó",
+  codigoSala: string,
+  uid: string,
+  nombre: string
+): void {
+  const etiqueta = accion === "conectó" ? colors.green : colors.yellow;
+  console.log(
+    etiqueta(
+      `[Sala] ${nombre} (${uid}) se ${accion} a la sala ${codigoSala}`
+    )
+  );
+}
+
 // Inicializar Socket.io para salas y chat (TS-02)
 export function initSocketServer(httpServer: HttpServer): Server {
   const io = new Server(httpServer, {
@@ -99,7 +114,7 @@ export function initSocketServer(httpServer: HttpServer): Server {
 
   io.on("connection", (socket: Socket) => {
     const data = socket.data as SocketData;
-    const salasActivas = new Set<string>();
+    const salasActivas = new Map<string, string>();
 
     socket.on("sala:unirse", async (payload: { salaId?: string }, ack?: (res: unknown) => void) => {
       try {
@@ -108,13 +123,15 @@ export function initSocketServer(httpServer: HttpServer): Server {
           throw new AppError("El id de la sala es obligatorio.", 400);
         }
 
-        await salaService.verificarAccesoSala(salaId, data.uid);
+        const sala = await salaService.verificarAccesoSala(salaId, data.uid);
+        const codigoSala = sala.codigoInvitacion ?? salaId;
         await socket.join(socketRoomName(salaId));
-        salasActivas.add(salaId);
+        salasActivas.set(salaId, codigoSala);
         const nombre = await salaService.obtenerNombreVisible(data.uid);
         data.nombre = nombre;
         registrarPresencia(salaId, data.uid, nombre);
         emitirPresencia(io, salaId);
+        logUsuarioSala("conectó", codigoSala, data.uid, nombre);
 
         ack?.({ ok: true, salaId });
       } catch (err) {
@@ -126,7 +143,7 @@ export function initSocketServer(httpServer: HttpServer): Server {
       try {
         const nombre = await salaService.obtenerNombreVisible(data.uid);
         data.nombre = nombre;
-        for (const salaId of salasActivas) {
+        for (const salaId of salasActivas.keys()) {
           registrarPresencia(salaId, data.uid, nombre);
           emitirPresencia(io, salaId);
         }
@@ -140,9 +157,11 @@ export function initSocketServer(httpServer: HttpServer): Server {
       const salaId = typeof payload?.salaId === "string" ? payload.salaId.trim() : "";
       if (!salaId) return;
       socket.leave(socketRoomName(salaId));
+      const codigoSala = salasActivas.get(salaId) ?? salaId;
       salasActivas.delete(salaId);
       quitarPresencia(salaId, data.uid);
       emitirPresencia(io, salaId);
+      logUsuarioSala("desconectó", codigoSala, data.uid, data.nombre);
     });
 
     socket.on(
@@ -168,9 +187,10 @@ export function initSocketServer(httpServer: HttpServer): Server {
     );
 
     socket.on("disconnect", () => {
-      for (const salaId of salasActivas) {
+      for (const [salaId, codigoSala] of salasActivas) {
         quitarPresencia(salaId, data.uid);
         emitirPresencia(io, salaId);
+        logUsuarioSala("desconectó", codigoSala, data.uid, data.nombre);
       }
     });
   });
