@@ -114,10 +114,26 @@ export function initSocketServer(httpServer: HttpServer): Server {
         await salaService.verificarAccesoSala(salaId, data.uid);
         await socket.join(socketRoomName(salaId));
         salasActivas.add(salaId);
-        registrarPresencia(salaId, data.uid, data.nombre);
+        const nombre = await salaService.obtenerNombreVisible(data.uid);
+        data.nombre = nombre;
+        registrarPresencia(salaId, data.uid, nombre);
         emitirPresencia(io, salaId);
 
         ack?.({ ok: true, salaId });
+      } catch (err) {
+        ack?.({ ok: false, error: obtenerErrorMensaje(err) });
+      }
+    });
+
+    socket.on("perfil:actualizar", async (ack?: (res: unknown) => void) => {
+      try {
+        const nombre = await salaService.obtenerNombreVisible(data.uid);
+        data.nombre = nombre;
+        for (const salaId of salasActivas) {
+          registrarPresencia(salaId, data.uid, nombre);
+          emitirPresencia(io, salaId);
+        }
+        ack?.({ ok: true, nombre });
       } catch (err) {
         ack?.({ ok: false, error: obtenerErrorMensaje(err) });
       }

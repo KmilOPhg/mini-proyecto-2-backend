@@ -127,19 +127,20 @@ async function obtenerDocumentoSala(salaId: string) {
   return { ref, snap, row };
 }
 
-async function obtenerUsername(uid: string): Promise<string> {
+/** Nombre visible en salas: nombre completo, username o email. */
+export async function obtenerNombreVisible(uid: string): Promise<string> {
   const snap = await getDb().collection(collections.usuarios).doc(uid).get();
   if (!snap.exists) {
     throw new AppError("Usuario no encontrado.", 404);
   }
   const data = snap.data()!;
-  if (typeof data.username === "string" && data.username.trim()) {
-    return data.username.trim();
-  }
   const nombres = typeof data.nombres === "string" ? data.nombres.trim() : "";
   const apellidos = typeof data.apellidos === "string" ? data.apellidos.trim() : "";
   const compuesto = `${nombres} ${apellidos}`.trim();
   if (compuesto) return compuesto;
+  if (typeof data.username === "string" && data.username.trim()) {
+    return data.username.trim();
+  }
   return typeof data.email === "string" ? data.email : uid;
 }
 
@@ -307,7 +308,7 @@ export async function guardarMensaje(
     throw new AppError("No tenés acceso a esta sala.", 403);
   }
 
-  const username = await obtenerUsername(uid);
+  const username = await obtenerNombreVisible(uid);
   const mensajeRef = ref.collection(collections.mensajes).doc();
   const now = FieldValue.serverTimestamp();
   await mensajeRef.set({
