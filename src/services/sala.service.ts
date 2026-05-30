@@ -8,6 +8,7 @@ import type {
   SalaPublica,
 } from "../types/sala.types.js";
 import { AppError } from "../utils/AppError.js";
+import { contarUsuariosEnLinea } from "../socket/presence.js";
 
 const NOMBRE_MIN = 3;
 const NOMBRE_MAX = 80;
@@ -104,6 +105,7 @@ function toSalaPublica(id: string, row: SalaFirestore, uidConsulta: string): Sal
     participantes: row.participantes,
     codigoInvitacion: row.codigoInvitacion ?? null,
     esCreador: row.creadorUid === uidConsulta,
+    usuariosEnLinea: contarUsuariosEnLinea(id),
     createdAt: timestampToIso(row.createdAt),
     updatedAt: timestampToIso(row.updatedAt),
   };

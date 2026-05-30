@@ -5,6 +5,7 @@ import { authenticateToken, validateRequest, type AuthenticatedRequest } from ".
 import { requireEstudianteUid } from "../middlewares/estudiante.middleware.js";
 import { sendSuccessResponse } from "../utils/JSONResponse.js";
 import * as salaService from "../services/sala.service.js";
+import { notificarSalaTerminada } from "../socket/index.js";
 
 // Listar salas creadas por el estudiante autenticado (US-06)
 export const listarMisSalasController = [
@@ -114,6 +115,7 @@ export const eliminarSalaController = [
     const uid = requireEstudianteUid(req);
     const salaId = decodeURIComponent(String(req.params.id));
     await salaService.eliminarSala(salaId, uid);
+    notificarSalaTerminada(salaId);
     sendSuccessResponse(res, 200, "Sala eliminada correctamente.", null);
   }),
 ];

@@ -2,6 +2,12 @@ import type { Server as HttpServer } from "node:http";
 import { Server, type Socket } from "socket.io";
 import * as salaService from "../services/sala.service.js";
 import { AppError } from "../utils/AppError.js";
+import {
+  limpiarPresenciaSala,
+  listarPresenciaSala,
+  quitarPresencia,
+  registrarPresencia,
+} from "./presence.js";
 import { socketRoomName, verifySocketJwt } from "./auth.js";
 
 type SocketData = {
@@ -9,12 +15,19 @@ type SocketData = {
   nombre: string;
 };
 
-type PresenciaUsuario = {
-  uid: string;
-  nombre: string;
-};
+let ioInstance: Server | null = null;
 
-const presenciaPorSala = new Map<string, Map<string, PresenciaUsuario>>();
+/** Notifica a todos los conectados y limpia presencia cuando se elimina la sala. */
+export function notificarSalaTerminada(
+  salaId: string,
+  mensaje = "El anfitrión terminó la sesión."
+): void {
+  if (!ioInstance) return;
+  const room = socketRoomName(salaId);
+  ioInstance.to(room).emit("sala:terminada", { salaId, mensaje });
+  limpiarPresenciaSala(salaId);
+  void ioInstance.in(room).socketsLeave(room);
+}
 
 function normalizarOrigen(valor?: string): string {
   return (valor || "").replace(/\/$/, "").toLowerCase();
@@ -25,6 +38,12 @@ function obtenerOrigenesPermitidos(): string[] {
     process.env.FRONTEND_URL,
     "http://localhost:5173",
     "http://127.0.0.1:5173",
+    "http://localhost:5174",
+    "http://127.0.0.1:5174",
+    "http://localhost:5175",
+    "http://127.0.0.1:5175",
+    "http://localhost:5176",
+    "http://127.0.0.1:5176",
     "http://localhost:1206",
     "http://127.0.0.1:1206",
   ]
@@ -32,30 +51,8 @@ function obtenerOrigenesPermitidos(): string[] {
     .map((origen) => normalizarOrigen(origen));
 }
 
-function registrarPresencia(salaId: string, uid: string, nombre: string): PresenciaUsuario[] {
-  let sala = presenciaPorSala.get(salaId);
-  if (!sala) {
-    sala = new Map();
-    presenciaPorSala.set(salaId, sala);
-  }
-  sala.set(uid, { uid, nombre });
-  return Array.from(sala.values());
-}
-
-function quitarPresencia(salaId: string, uid: string): PresenciaUsuario[] {
-  const sala = presenciaPorSala.get(salaId);
-  if (!sala) return [];
-  sala.delete(uid);
-  if (sala.size === 0) {
-    presenciaPorSala.delete(salaId);
-    return [];
-  }
-  return Array.from(sala.values());
-}
-
 function emitirPresencia(io: Server, salaId: string): void {
-  const usuarios = presenciaPorSala.get(salaId);
-  const lista = usuarios ? Array.from(usuarios.values()) : [];
+  const lista = listarPresenciaSala(salaId);
   io.to(socketRoomName(salaId)).emit("presencia:actualizada", { salaId, usuarios: lista });
 }
 
@@ -178,5 +175,6 @@ export function initSocketServer(httpServer: HttpServer): Server {
     });
   });
 
+  ioInstance = io;
   return io;
 }
