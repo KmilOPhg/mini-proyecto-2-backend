@@ -2,16 +2,20 @@ import { FieldValue, type DocumentData, type Timestamp } from "firebase-admin/fi
 import { getDb } from "../../lib/firebase.js";
 import { collections } from "../../lib/firestoreCollections.js";
 import type {
+  CrearSalaInput,
   ListarMisSalasResultado,
   MensajePublico,
+  PrivacidadSala,
   SalaFirestore,
   SalaPublica,
 } from "../types/sala.types.js";
 import { AppError } from "../utils/AppError.js";
-import { contarUsuariosEnLinea } from "../socket/presence.js";
+import { contarUsuariosEnLinea, listarPresenciaSala } from "../socket/presence.js";
 
 const NOMBRE_MIN = 3;
 const NOMBRE_MAX = 80;
+const AFORO_MIN = 2;
+const AFORO_MAX = 50;
 const MENSAJE_MAX = 2000;
 const MENSAJES_DEFAULT_LIMIT = 50;
 const MENSAJES_MAX_LIMIT = 100;
@@ -81,17 +85,50 @@ function normalizarTextoMensaje(texto: string): string {
   return limpio;
 }
 
+function normalizarAforo(aforo?: number): number {
+  const n = Number(aforo);
+  if (!Number.isFinite(n) || n < AFORO_MIN || n > AFORO_MAX) {
+    throw new AppError(`El aforo debe estar entre ${AFORO_MIN} y ${AFORO_MAX}.`, 400);
+  }
+  return Math.floor(n);
+}
+
+function normalizarPrivacidad(privacidad?: string): PrivacidadSala {
+  if (privacidad === "publica" || privacidad === "enlace") return privacidad;
+  return "enlace";
+}
+
+function normalizarTextoOpcional(texto: string | undefined, max: number): string | undefined {
+  if (texto === undefined) return undefined;
+  const limpio = texto.trim();
+  if (!limpio) return undefined;
+  if (limpio.length > max) {
+    throw new AppError(`El texto no puede superar ${max} caracteres.`, 400);
+  }
+  return limpio;
+}
+
 function asSalaRow(data: DocumentData | undefined): SalaFirestore | null {
   if (!data || typeof data.nombre !== "string" || typeof data.creadorUid !== "string") return null;
   const participantes = Array.isArray(data.participantes)
     ? data.participantes.filter((p): p is string => typeof p === "string")
     : [];
+  const aforoRaw = Number(data.aforoMaximo);
+  const aforoMaximo =
+    Number.isFinite(aforoRaw) && aforoRaw >= AFORO_MIN && aforoRaw <= AFORO_MAX
+      ? Math.floor(aforoRaw)
+      : AFORO_MAX;
+  const privacidad: PrivacidadSala = data.privacidad === "publica" ? "publica" : "enlace";
   return {
     nombre: data.nombre,
     creadorUid: data.creadorUid,
     participantes,
     codigoInvitacion:
       typeof data.codigoInvitacion === "string" ? data.codigoInvitacion : undefined,
+    aforoMaximo,
+    privacidad,
+    materia: typeof data.materia === "string" ? data.materia : undefined,
+    descripcion: typeof data.descripcion === "string" ? data.descripcion : undefined,
     createdAt: data.createdAt as Timestamp | undefined,
     updatedAt: data.updatedAt as Timestamp | undefined,
   };
@@ -104,11 +141,36 @@ function toSalaPublica(id: string, row: SalaFirestore, uidConsulta: string): Sal
     creadorUid: row.creadorUid,
     participantes: row.participantes,
     codigoInvitacion: row.codigoInvitacion ?? null,
+    aforoMaximo: row.aforoMaximo,
+    privacidad: row.privacidad,
+    materia: row.materia ?? null,
+    descripcion: row.descripcion ?? null,
     esCreador: row.creadorUid === uidConsulta,
     usuariosEnLinea: contarUsuariosEnLinea(id),
     createdAt: timestampToIso(row.createdAt),
     updatedAt: timestampToIso(row.updatedAt),
   };
+}
+
+function verificarCupoParticipantes(row: SalaFirestore): void {
+  if (row.participantes.length >= row.aforoMaximo) {
+    throw new AppError("La sala alcanzó el aforo máximo.", 403);
+  }
+}
+
+function verificarCupoEnLinea(salaId: string, row: SalaFirestore, uid: string): void {
+  const yaEnLinea = listarPresenciaSala(salaId).some((u) => u.uid === uid);
+  if (yaEnLinea) return;
+  if (contarUsuariosEnLinea(salaId) >= row.aforoMaximo) {
+    throw new AppError("La sala está llena en este momento.", 403);
+  }
+}
+
+function verificarUnionPorId(row: SalaFirestore, uid: string): void {
+  if (tieneAccesoSala(row, uid)) return;
+  if (row.privacidad === "enlace") {
+    throw new AppError("Esta sala es privada. Unite con el código de invitación CRF.", 403);
+  }
 }
 
 function tieneAccesoSala(row: SalaFirestore, uid: string): boolean {
@@ -147,13 +209,13 @@ export async function obtenerNombreVisible(uid: string): Promise<string> {
 }
 
 // Crear sala de estudio (US-06)
-export async function crearSala(
-  creadorUid: string,
-  nombre: string,
-  codigoSolicitado?: string
-): Promise<SalaPublica> {
-  const nombreNormalizado = normalizarNombre(nombre);
-  const codigoInvitacion = await resolverCodigoInvitacion(codigoSolicitado);
+export async function crearSala(creadorUid: string, input: CrearSalaInput): Promise<SalaPublica> {
+  const nombreNormalizado = normalizarNombre(input.nombre);
+  const codigoInvitacion = await resolverCodigoInvitacion(input.codigoInvitacion);
+  const aforoMaximo = normalizarAforo(input.aforoMaximo ?? 8);
+  const privacidad = normalizarPrivacidad(input.privacidad);
+  const materia = normalizarTextoOpcional(input.materia, 80);
+  const descripcion = normalizarTextoOpcional(input.descripcion, 300);
   const db = getDb();
   const now = FieldValue.serverTimestamp();
   const row: Omit<SalaFirestore, "createdAt" | "updatedAt"> & {
@@ -164,6 +226,10 @@ export async function crearSala(
     creadorUid,
     participantes: [creadorUid],
     codigoInvitacion,
+    aforoMaximo,
+    privacidad,
+    ...(materia ? { materia } : {}),
+    ...(descripcion ? { descripcion } : {}),
     createdAt: now,
     updatedAt: now,
   };
@@ -216,6 +282,30 @@ export async function unirseASala(salaId: string, uid: string): Promise<SalaPubl
     return toSalaPublica(salaId, row, uid);
   }
 
+  verificarUnionPorId(row, uid);
+  verificarCupoParticipantes(row);
+
+  await ref.update({
+    participantes: FieldValue.arrayUnion(uid),
+    updatedAt: FieldValue.serverTimestamp(),
+  });
+
+  const updated = await ref.get();
+  const updatedRow = asSalaRow(updated.data());
+  if (!updatedRow) {
+    throw new AppError("No se pudo actualizar la sala.", 500);
+  }
+  return toSalaPublica(salaId, updatedRow, uid);
+}
+
+async function agregarParticipantePorCodigo(salaId: string, uid: string): Promise<SalaPublica> {
+  const { ref, row } = await obtenerDocumentoSala(salaId);
+  if (tieneAccesoSala(row, uid)) {
+    return toSalaPublica(salaId, row, uid);
+  }
+
+  verificarCupoParticipantes(row);
+
   await ref.update({
     participantes: FieldValue.arrayUnion(uid),
     updatedAt: FieldValue.serverTimestamp(),
@@ -243,7 +333,7 @@ export async function unirsePorCodigo(codigo: string, uid: string): Promise<Sala
   }
 
   const doc = snap.docs[0]!;
-  return unirseASala(doc.id, uid);
+  return agregarParticipantePorCodigo(doc.id, uid);
 }
 
 // Actualizar nombre de sala (US-07, solo creador)
@@ -365,7 +455,10 @@ export async function listarMensajes(
     .reverse();
 }
 
-// Verificar acceso a sala (WebSocket)
+// Verificar acceso y cupo en línea al entrar por WebSocket
 export async function verificarAccesoSala(salaId: string, uid: string): Promise<SalaPublica> {
-  return obtenerSala(salaId, uid);
+  const sala = await obtenerSala(salaId, uid);
+  const { row } = await obtenerDocumentoSala(salaId);
+  verificarCupoEnLinea(salaId, row, uid);
+  return sala;
 }
