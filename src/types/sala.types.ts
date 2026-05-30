@@ -18,6 +18,7 @@ export type SalaPublica = {
   participantes: string[];
   codigoInvitacion: string | null;
   esCreador: boolean;
+  usuariosEnLinea: number;
   createdAt: string | null;
   updatedAt: string | null;
 };
