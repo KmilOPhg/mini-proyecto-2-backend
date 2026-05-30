@@ -35,11 +35,7 @@ export type SalaPublica = {
 
 export type CrearSalaInput = {
   nombre: string;
-  codigoInvitacion?: string;
-  aforoMaximo?: number;
-  privacidad?: PrivacidadSala;
-  materia?: string;
-  descripcion?: string;
+  codigoInvitacion: string;
 };
 
 // Resultado del dashboard de salas propias (US-06)

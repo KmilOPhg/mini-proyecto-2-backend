@@ -16,6 +16,8 @@ const NOMBRE_MIN = 3;
 const NOMBRE_MAX = 80;
 const AFORO_MIN = 2;
 const AFORO_MAX = 50;
+const AFORO_DEFAULT = 8;
+const PRIVACIDAD_DEFAULT: PrivacidadSala = "enlace";
 const MENSAJE_MAX = 2000;
 const MENSAJES_DEFAULT_LIMIT = 50;
 const MENSAJES_MAX_LIMIT = 100;
@@ -81,29 +83,6 @@ function normalizarTextoMensaje(texto: string): string {
   }
   if (limpio.length > MENSAJE_MAX) {
     throw new AppError(`El mensaje no puede superar ${MENSAJE_MAX} caracteres.`, 400);
-  }
-  return limpio;
-}
-
-function normalizarAforo(aforo?: number): number {
-  const n = Number(aforo);
-  if (!Number.isFinite(n) || n < AFORO_MIN || n > AFORO_MAX) {
-    throw new AppError(`El aforo debe estar entre ${AFORO_MIN} y ${AFORO_MAX}.`, 400);
-  }
-  return Math.floor(n);
-}
-
-function normalizarPrivacidad(privacidad?: string): PrivacidadSala {
-  if (privacidad === "publica" || privacidad === "enlace") return privacidad;
-  return "enlace";
-}
-
-function normalizarTextoOpcional(texto: string | undefined, max: number): string | undefined {
-  if (texto === undefined) return undefined;
-  const limpio = texto.trim();
-  if (!limpio) return undefined;
-  if (limpio.length > max) {
-    throw new AppError(`El texto no puede superar ${max} caracteres.`, 400);
   }
   return limpio;
 }
@@ -212,10 +191,6 @@ export async function obtenerNombreVisible(uid: string): Promise<string> {
 export async function crearSala(creadorUid: string, input: CrearSalaInput): Promise<SalaPublica> {
   const nombreNormalizado = normalizarNombre(input.nombre);
   const codigoInvitacion = await resolverCodigoInvitacion(input.codigoInvitacion);
-  const aforoMaximo = normalizarAforo(input.aforoMaximo ?? 8);
-  const privacidad = normalizarPrivacidad(input.privacidad);
-  const materia = normalizarTextoOpcional(input.materia, 80);
-  const descripcion = normalizarTextoOpcional(input.descripcion, 300);
   const db = getDb();
   const now = FieldValue.serverTimestamp();
   const row: Omit<SalaFirestore, "createdAt" | "updatedAt"> & {
@@ -226,10 +201,8 @@ export async function crearSala(creadorUid: string, input: CrearSalaInput): Prom
     creadorUid,
     participantes: [creadorUid],
     codigoInvitacion,
-    aforoMaximo,
-    privacidad,
-    ...(materia ? { materia } : {}),
-    ...(descripcion ? { descripcion } : {}),
+    aforoMaximo: AFORO_DEFAULT,
+    privacidad: PRIVACIDAD_DEFAULT,
     createdAt: now,
     updatedAt: now,
   };

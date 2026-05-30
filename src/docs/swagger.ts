@@ -176,9 +176,15 @@ const options: swaggerJSDoc.Options = {
         },
         CrearSalaBody: {
           type: "object",
-          required: ["nombre"],
+          required: ["nombre", "codigoInvitacion"],
           properties: {
             nombre: { type: "string", minLength: 3, maxLength: 80 },
+            codigoInvitacion: {
+              type: "string",
+              pattern: "^CRF-[A-Za-z0-9]{3}-[A-Za-z0-9]{3}$",
+              example: "CRF-7K3-92Q",
+              description: "ID generado en el cliente (formato CRF-XXX-XXX).",
+            },
           },
         },
         MensajePublico: {
