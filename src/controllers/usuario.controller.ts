@@ -173,6 +173,7 @@ export const actualizarMiPerfilController = [
       uid,
       nombres: data.nombres ?? "",
       apellidos: data.apellidos ?? "",
+      username: data.username,
       email: data.email,
       rolId: data.rolId,
       estado: data.estado,

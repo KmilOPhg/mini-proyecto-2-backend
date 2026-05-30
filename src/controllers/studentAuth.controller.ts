@@ -109,7 +109,11 @@ export const logoutHandler = [
   authenticateToken,
   asyncWrapper(async (req: AuthenticatedRequest, res: Response) => {
     const user = req.user!;
-    logAuthSesionCierre(user.id, user.nombre, user.email);
+    logAuthSesionCierre(
+      user.id,
+      user.nombre.trim() || user.email || user.id,
+      user.email
+    );
     sendSuccessResponse(res, 200, "Sesión cerrada.", null);
   }),
 ];
