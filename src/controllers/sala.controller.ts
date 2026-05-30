@@ -30,33 +30,17 @@ export const crearSalaController = [
     .isLength({ min: 3, max: 80 })
     .withMessage("El nombre debe tener entre 3 y 80 caracteres."),
   body("codigoInvitacion")
-    .optional()
     .trim()
+    .notEmpty()
+    .withMessage("El ID de la sala es obligatorio.")
     .matches(/^CRF-[A-Za-z0-9]{3}-[A-Za-z0-9]{3}$/)
-    .withMessage("El código debe tener el formato CRF-XXX-XXX."),
-  body("aforoMaximo")
-    .optional()
-    .isInt({ min: 2, max: 50 })
-    .withMessage("El aforo debe estar entre 2 y 50."),
-  body("privacidad")
-    .optional()
-    .isIn(["publica", "enlace"])
-    .withMessage("La privacidad debe ser publica o enlace."),
-  body("materia").optional().trim().isLength({ max: 80 }),
-  body("descripcion").optional().trim().isLength({ max: 300 }),
+    .withMessage("El ID debe tener el formato CRF-XXX-XXX."),
   validateRequest,
   asyncWrapper(async (req: AuthenticatedRequest, res: Response) => {
     const uid = requireEstudianteUid(req);
     const data = await salaService.crearSala(uid, {
       nombre: String(req.body.nombre),
-      codigoInvitacion:
-        typeof req.body.codigoInvitacion === "string" ? req.body.codigoInvitacion : undefined,
-      aforoMaximo:
-        req.body.aforoMaximo !== undefined ? Number(req.body.aforoMaximo) : undefined,
-      privacidad:
-        typeof req.body.privacidad === "string" ? req.body.privacidad : undefined,
-      materia: typeof req.body.materia === "string" ? req.body.materia : undefined,
-      descripcion: typeof req.body.descripcion === "string" ? req.body.descripcion : undefined,
+      codigoInvitacion: String(req.body.codigoInvitacion),
     });
     sendSuccessResponse(res, 201, "Sala creada correctamente.", data);
   }),

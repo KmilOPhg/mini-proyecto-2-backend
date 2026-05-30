@@ -1,11 +1,13 @@
 import jwt from "jsonwebtoken";
 import type { JwtUserPayload } from "../middlewares/auth.middleware.js";
+import { nombreVisibleEstudiante } from "./authLogger.js";
 import { AppError } from "./AppError.js";
 
 export function signStudentSessionJwt(input: {
   uid: string;
   nombres: string;
   apellidos: string;
+  username?: string | null;
   email: string | null;
   rolId: string;
   estado: JwtUserPayload["estado"];
@@ -15,7 +17,13 @@ export function signStudentSessionJwt(input: {
     throw new AppError("JWT_SECRET no está configurado en el servidor", 500);
   }
 
-  const nombre = `${input.nombres} ${input.apellidos}`.trim() || input.email || input.uid;
+  const nombre = nombreVisibleEstudiante({
+    id: input.uid,
+    username: input.username,
+    nombres: input.nombres,
+    apellidos: input.apellidos,
+    email: input.email,
+  });
   const payload: JwtUserPayload = {
     id: input.uid,
     nombre,
