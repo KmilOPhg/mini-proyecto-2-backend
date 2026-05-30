@@ -14,6 +14,47 @@ const NOMBRE_MAX = 80;
 const MENSAJE_MAX = 2000;
 const MENSAJES_DEFAULT_LIMIT = 50;
 const MENSAJES_MAX_LIMIT = 100;
+const CODIGO_RE = /^CRF-[A-Z0-9]{3}-[A-Z0-9]{3}$/;
+const CODIGO_CHARS = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
+
+function generarCodigoInvitacion(): string {
+  const part = (n: number) =>
+    Array.from({ length: n }, () => CODIGO_CHARS[Math.floor(Math.random() * CODIGO_CHARS.length)]).join("");
+  return `CRF-${part(3)}-${part(3)}`;
+}
+
+function normalizarCodigoInvitacion(codigo: string): string {
+  const limpio = codigo.trim().toUpperCase();
+  if (!CODIGO_RE.test(limpio)) {
+    throw new AppError("El código debe tener el formato CRF-XXX-XXX.", 400);
+  }
+  return limpio;
+}
+
+async function codigoInvitacionDisponible(codigo: string): Promise<boolean> {
+  const snap = await getDb()
+    .collection(collections.salas)
+    .where("codigoInvitacion", "==", codigo)
+    .limit(1)
+    .get();
+  return snap.empty;
+}
+
+async function resolverCodigoInvitacion(codigoSolicitado?: string): Promise<string> {
+  if (codigoSolicitado) {
+    const codigo = normalizarCodigoInvitacion(codigoSolicitado);
+    if (!(await codigoInvitacionDisponible(codigo))) {
+      throw new AppError("Ese código de invitación ya está en uso.", 409);
+    }
+    return codigo;
+  }
+
+  for (let i = 0; i < 8; i++) {
+    const codigo = generarCodigoInvitacion();
+    if (await codigoInvitacionDisponible(codigo)) return codigo;
+  }
+  throw new AppError("No se pudo generar un código de invitación único.", 500);
+}
 
 function timestampToIso(value: Timestamp | undefined): string | null {
   if (!value || typeof value.toDate !== "function") return null;
@@ -48,6 +89,8 @@ function asSalaRow(data: DocumentData | undefined): SalaFirestore | null {
     nombre: data.nombre,
     creadorUid: data.creadorUid,
     participantes,
+    codigoInvitacion:
+      typeof data.codigoInvitacion === "string" ? data.codigoInvitacion : undefined,
     createdAt: data.createdAt as Timestamp | undefined,
     updatedAt: data.updatedAt as Timestamp | undefined,
   };
@@ -59,6 +102,7 @@ function toSalaPublica(id: string, row: SalaFirestore, uidConsulta: string): Sal
     nombre: row.nombre,
     creadorUid: row.creadorUid,
     participantes: row.participantes,
+    codigoInvitacion: row.codigoInvitacion ?? null,
     esCreador: row.creadorUid === uidConsulta,
     createdAt: timestampToIso(row.createdAt),
     updatedAt: timestampToIso(row.updatedAt),
@@ -100,8 +144,13 @@ async function obtenerUsername(uid: string): Promise<string> {
 }
 
 // Crear sala de estudio (US-06)
-export async function crearSala(creadorUid: string, nombre: string): Promise<SalaPublica> {
+export async function crearSala(
+  creadorUid: string,
+  nombre: string,
+  codigoSolicitado?: string
+): Promise<SalaPublica> {
   const nombreNormalizado = normalizarNombre(nombre);
+  const codigoInvitacion = await resolverCodigoInvitacion(codigoSolicitado);
   const db = getDb();
   const now = FieldValue.serverTimestamp();
   const row: Omit<SalaFirestore, "createdAt" | "updatedAt"> & {
@@ -111,6 +160,7 @@ export async function crearSala(creadorUid: string, nombre: string): Promise<Sal
     nombre: nombreNormalizado,
     creadorUid,
     participantes: [creadorUid],
+    codigoInvitacion,
     createdAt: now,
     updatedAt: now,
   };
@@ -174,6 +224,23 @@ export async function unirseASala(salaId: string, uid: string): Promise<SalaPubl
     throw new AppError("No se pudo actualizar la sala.", 500);
   }
   return toSalaPublica(salaId, updatedRow, uid);
+}
+
+// Unirse a una sala por código CRF-XXX-XXX (TS-02)
+export async function unirsePorCodigo(codigo: string, uid: string): Promise<SalaPublica> {
+  const codigoNormalizado = normalizarCodigoInvitacion(codigo);
+  const snap = await getDb()
+    .collection(collections.salas)
+    .where("codigoInvitacion", "==", codigoNormalizado)
+    .limit(1)
+    .get();
+
+  if (snap.empty) {
+    throw new AppError("No existe una sala con ese código.", 404);
+  }
+
+  const doc = snap.docs[0]!;
+  return unirseASala(doc.id, uid);
 }
 
 // Actualizar nombre de sala (US-07, solo creador)

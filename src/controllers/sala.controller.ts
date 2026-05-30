@@ -28,10 +28,17 @@ export const crearSalaController = [
     .withMessage("El nombre es obligatorio.")
     .isLength({ min: 3, max: 80 })
     .withMessage("El nombre debe tener entre 3 y 80 caracteres."),
+  body("codigoInvitacion")
+    .optional()
+    .trim()
+    .matches(/^CRF-[A-Za-z0-9]{3}-[A-Za-z0-9]{3}$/)
+    .withMessage("El código debe tener el formato CRF-XXX-XXX."),
   validateRequest,
   asyncWrapper(async (req: AuthenticatedRequest, res: Response) => {
     const uid = requireEstudianteUid(req);
-    const data = await salaService.crearSala(uid, String(req.body.nombre));
+    const codigo =
+      typeof req.body.codigoInvitacion === "string" ? req.body.codigoInvitacion : undefined;
+    const data = await salaService.crearSala(uid, String(req.body.nombre), codigo);
     sendSuccessResponse(res, 201, "Sala creada correctamente.", data);
   }),
 ];
@@ -58,6 +65,23 @@ export const unirseSalaController = [
     const uid = requireEstudianteUid(req);
     const salaId = decodeURIComponent(String(req.params.id));
     const data = await salaService.unirseASala(salaId, uid);
+    sendSuccessResponse(res, 200, "Te uniste a la sala correctamente.", data);
+  }),
+];
+
+// Unirse a una sala por código CRF-XXX-XXX (TS-02)
+export const unirsePorCodigoController = [
+  authenticateToken,
+  body("codigo")
+    .trim()
+    .notEmpty()
+    .withMessage("El código es obligatorio.")
+    .matches(/^CRF-[A-Za-z0-9]{3}-[A-Za-z0-9]{3}$/)
+    .withMessage("El código debe tener el formato CRF-XXX-XXX."),
+  validateRequest,
+  asyncWrapper(async (req: AuthenticatedRequest, res: Response) => {
+    const uid = requireEstudianteUid(req);
+    const data = await salaService.unirsePorCodigo(String(req.body.codigo), uid);
     sendSuccessResponse(res, 200, "Te uniste a la sala correctamente.", data);
   }),
 ];
