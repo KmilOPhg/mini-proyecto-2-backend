@@ -11,6 +11,7 @@ import { sendSuccessResponse } from "../utils/JSONResponse.js";
 import * as usuarioService from "../services/usuario.service.js";
 import type { EstadoUsuario } from "../types/usuario.types.js";
 import { requireEstudianteUid } from "../middlewares/estudiante.middleware.js";
+import { signStudentSessionJwt } from "../utils/studentJwt.js";
 
 const passwordRules = body("password")
   .isLength({ min: 8 })
@@ -162,7 +163,15 @@ export const actualizarMiPerfilController = [
       email: req.body.email !== undefined ? String(req.body.email) : undefined,
       avatar,
     });
-    sendSuccessResponse(res, 200, "Perfil actualizado correctamente.", data);
+    const token = signStudentSessionJwt({
+      uid,
+      nombres: data.nombres ?? "",
+      apellidos: data.apellidos ?? "",
+      email: data.email,
+      rolId: data.rolId,
+      estado: data.estado,
+    });
+    sendSuccessResponse(res, 200, "Perfil actualizado correctamente.", { user: data, token });
   }),
 ];
 
