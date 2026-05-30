@@ -1,42 +1,28 @@
-type PresenciaUsuario = {
-  uid: string;
-  nombre: string;
+const SOCKET_URL = process.env.SOCKET_SERVER_URL?.trim().replace(/\/$/, "") ?? "";
+const API_KEY = process.env.INTERNAL_API_KEY?.trim() ?? "";
+
+async function fetchSocketServer<T>(path: string): Promise<T | null> {
+  if (!SOCKET_URL) return null;
+  try {
+    const res = await fetch(`${SOCKET_URL}${path}`, {
+      headers: API_KEY ? { "x-internal-api-key": API_KEY } : {},
+    });
+    if (!res.ok) return null;
+    return (await res.json()) as T;
+  } catch {
+    return null;
+  }
+}
+
+type PresenciaResponse = {
+  status: string;
+  data: { salaId: string; count: number };
 };
 
-const presenciaPorSala = new Map<string, Map<string, PresenciaUsuario>>();
-
-export function registrarPresencia(salaId: string, uid: string, nombre: string): PresenciaUsuario[] {
-  let sala = presenciaPorSala.get(salaId);
-  if (!sala) {
-    sala = new Map();
-    presenciaPorSala.set(salaId, sala);
-  }
-  sala.set(uid, { uid, nombre });
-  return Array.from(sala.values());
+/** Consulta al servidor de Socket.io cuántos usuarios están en línea en una sala. */
+export async function contarUsuariosEnLinea(salaId: string): Promise<number> {
+  const data = await fetchSocketServer<PresenciaResponse>(
+    `/internal/presencia/${encodeURIComponent(salaId)}/count`
+  );
+  return data?.data?.count ?? 0;
 }
-
-export function quitarPresencia(salaId: string, uid: string): PresenciaUsuario[] {
-  const sala = presenciaPorSala.get(salaId);
-  if (!sala) return [];
-  sala.delete(uid);
-  if (sala.size === 0) {
-    presenciaPorSala.delete(salaId);
-    return [];
-  }
-  return Array.from(sala.values());
-}
-
-export function listarPresenciaSala(salaId: string): PresenciaUsuario[] {
-  const sala = presenciaPorSala.get(salaId);
-  return sala ? Array.from(sala.values()) : [];
-}
-
-export function contarUsuariosEnLinea(salaId: string): number {
-  return presenciaPorSala.get(salaId)?.size ?? 0;
-}
-
-export function limpiarPresenciaSala(salaId: string): void {
-  presenciaPorSala.delete(salaId);
-}
-
-export type { PresenciaUsuario };

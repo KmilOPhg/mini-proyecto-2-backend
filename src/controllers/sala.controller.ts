@@ -118,6 +118,7 @@ export const eliminarSalaController = [
     const salaId = decodeURIComponent(String(req.params.id));
     await salaService.eliminarSala(salaId, uid);
     notificarSalaTerminada(salaId);
+    void 0; // fire-and-forget
     sendSuccessResponse(res, 200, "Sala eliminada correctamente.", null);
   }),
 ];

@@ -10,7 +10,7 @@ import type {
   SalaPublica,
 } from "../types/sala.types.js";
 import { AppError } from "../utils/AppError.js";
-import { contarUsuariosEnLinea, listarPresenciaSala } from "../socket/presence.js";
+import { contarUsuariosEnLinea } from "../socket/presence.js";
 
 const NOMBRE_MIN = 3;
 const NOMBRE_MAX = 80;
@@ -113,7 +113,7 @@ function asSalaRow(data: DocumentData | undefined): SalaFirestore | null {
   };
 }
 
-function toSalaPublica(id: string, row: SalaFirestore, uidConsulta: string): SalaPublica {
+async function toSalaPublica(id: string, row: SalaFirestore, uidConsulta: string): Promise<SalaPublica> {
   return {
     id,
     nombre: row.nombre,
@@ -125,7 +125,7 @@ function toSalaPublica(id: string, row: SalaFirestore, uidConsulta: string): Sal
     materia: row.materia ?? null,
     descripcion: row.descripcion ?? null,
     esCreador: row.creadorUid === uidConsulta,
-    usuariosEnLinea: contarUsuariosEnLinea(id),
+    usuariosEnLinea: await contarUsuariosEnLinea(id),
     createdAt: timestampToIso(row.createdAt),
     updatedAt: timestampToIso(row.updatedAt),
   };
@@ -134,14 +134,6 @@ function toSalaPublica(id: string, row: SalaFirestore, uidConsulta: string): Sal
 function verificarCupoParticipantes(row: SalaFirestore): void {
   if (row.participantes.length >= row.aforoMaximo) {
     throw new AppError("La sala alcanzó el aforo máximo.", 403);
-  }
-}
-
-function verificarCupoEnLinea(salaId: string, row: SalaFirestore, uid: string): void {
-  const yaEnLinea = listarPresenciaSala(salaId).some((u) => u.uid === uid);
-  if (yaEnLinea) return;
-  if (contarUsuariosEnLinea(salaId) >= row.aforoMaximo) {
-    throw new AppError("La sala está llena en este momento.", 403);
   }
 }
 
@@ -213,7 +205,7 @@ export async function crearSala(creadorUid: string, input: CrearSalaInput): Prom
   if (!createdRow) {
     throw new AppError("No se pudo leer la sala recién creada.", 500);
   }
-  return toSalaPublica(ref.id, createdRow, creadorUid);
+  return await toSalaPublica(ref.id, createdRow, creadorUid);
 }
 
 // Listar salas creadas por el anfitrión (US-06)
@@ -223,14 +215,17 @@ export async function listarMisSalas(creadorUid: string): Promise<ListarMisSalas
     .where("creadorUid", "==", creadorUid)
     .get();
 
-  const items = snap.docs
+  const rawItems = snap.docs
     .map((doc) => {
       const row = asSalaRow(doc.data());
       if (!row) return null;
-      return toSalaPublica(doc.id, row, creadorUid);
+      return { id: doc.id, row };
     })
-    .filter((item): item is SalaPublica => item !== null)
-    .sort((a, b) => a.nombre.localeCompare(b.nombre));
+    .filter((x): x is { id: string; row: SalaFirestore } => x !== null);
+
+  const items = (
+    await Promise.all(rawItems.map(({ id, row }) => toSalaPublica(id, row, creadorUid)))
+  ).sort((a, b) => a.nombre.localeCompare(b.nombre));
 
   return {
     items,
@@ -245,14 +240,14 @@ export async function obtenerSala(salaId: string, uid: string): Promise<SalaPubl
   if (!tieneAccesoSala(row, uid)) {
     throw new AppError("No tenés acceso a esta sala.", 403);
   }
-  return toSalaPublica(salaId, row, uid);
+  return await toSalaPublica(salaId, row, uid);
 }
 
 // Unirse a una sala por ID (TS-02)
 export async function unirseASala(salaId: string, uid: string): Promise<SalaPublica> {
   const { ref, row } = await obtenerDocumentoSala(salaId);
   if (tieneAccesoSala(row, uid)) {
-    return toSalaPublica(salaId, row, uid);
+    return await toSalaPublica(salaId, row, uid);
   }
 
   verificarUnionPorId(row, uid);
@@ -268,13 +263,13 @@ export async function unirseASala(salaId: string, uid: string): Promise<SalaPubl
   if (!updatedRow) {
     throw new AppError("No se pudo actualizar la sala.", 500);
   }
-  return toSalaPublica(salaId, updatedRow, uid);
+  return await toSalaPublica(salaId, updatedRow, uid);
 }
 
 async function agregarParticipantePorCodigo(salaId: string, uid: string): Promise<SalaPublica> {
   const { ref, row } = await obtenerDocumentoSala(salaId);
   if (tieneAccesoSala(row, uid)) {
-    return toSalaPublica(salaId, row, uid);
+    return await toSalaPublica(salaId, row, uid);
   }
 
   verificarCupoParticipantes(row);
@@ -289,7 +284,7 @@ async function agregarParticipantePorCodigo(salaId: string, uid: string): Promis
   if (!updatedRow) {
     throw new AppError("No se pudo actualizar la sala.", 500);
   }
-  return toSalaPublica(salaId, updatedRow, uid);
+  return await toSalaPublica(salaId, updatedRow, uid);
 }
 
 // Unirse a una sala por código CRF-XXX-XXX (TS-02)
@@ -331,7 +326,7 @@ export async function actualizarNombreSala(
   if (!updatedRow) {
     throw new AppError("No se pudo actualizar la sala.", 500);
   }
-  return toSalaPublica(salaId, updatedRow, uid);
+  return await toSalaPublica(salaId, updatedRow, uid);
 }
 
 // Eliminar sala y sus mensajes (US-07, solo creador)
@@ -428,10 +423,3 @@ export async function listarMensajes(
     .reverse();
 }
 
-// Verificar acceso y cupo en línea al entrar por WebSocket
-export async function verificarAccesoSala(salaId: string, uid: string): Promise<SalaPublica> {
-  const sala = await obtenerSala(salaId, uid);
-  const { row } = await obtenerDocumentoSala(salaId);
-  verificarCupoEnLinea(salaId, row, uid);
-  return sala;
-}
