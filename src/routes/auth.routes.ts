@@ -1,6 +1,7 @@
 import { Router } from "express";
 import {
   completeGoogleUsernameHandler,
+  logoutHandler,
   registerStudentHandler,
   sessionHandler,
   usernameAvailableHandler,
@@ -14,6 +15,7 @@ router.post("/login", loginAdminController);
 router.post("/register", registerStudentHandler);
 router.get("/username-available", usernameAvailableHandler);
 router.post("/session", sessionHandler);
+router.post("/logout", logoutHandler);
 router.post("/google/complete-username", completeGoogleUsernameHandler);
 router.use("/users", usersRouter);
 

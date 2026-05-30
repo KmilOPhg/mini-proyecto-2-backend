@@ -1,11 +1,20 @@
 import type { Response } from "express";
 import { body, query } from "express-validator";
 import asyncWrapper from "../utils/AsyncWrapper.js";
-import { validateRequest } from "../middlewares/auth.middleware.js";
+import {
+  authenticateToken,
+  validateRequest,
+  type AuthenticatedRequest,
+} from "../middlewares/auth.middleware.js";
 import { sendSuccessResponse } from "../utils/JSONResponse.js";
 import type { FirebaseAuthRequest } from "../middlewares/firebase-id-token.middleware.js";
 import { requireFirebaseIdToken } from "../middlewares/firebase-id-token.middleware.js";
 import * as studentAuth from "../services/studentAuth.service.js";
+import {
+  logAuthSesionCierre,
+  logAuthSesionInicio,
+  nombreVisibleEstudiante,
+} from "../utils/authLogger.js";
 
 const registerValidators = [
   body("nombres").trim().notEmpty().withMessage("Los nombres son obligatorios.").isLength({ max: 120 }),
@@ -65,6 +74,13 @@ export const sessionHandler = [
   asyncWrapper(async (req, res: Response) => {
     const decoded = (req as FirebaseAuthRequest).firebaseUser;
     const result = await studentAuth.resolveSessionForDecoded(decoded);
+    if (!result.needsUsername) {
+      logAuthSesionInicio(
+        result.user.id,
+        nombreVisibleEstudiante(result.user),
+        result.user.email
+      );
+    }
     sendSuccessResponse(res, 200, "Sesión verificada.", result);
   }),
 ];
@@ -80,6 +96,20 @@ export const completeGoogleUsernameHandler = [
   asyncWrapper(async (req, res: Response) => {
     const decoded = (req as FirebaseAuthRequest).firebaseUser;
     const result = await studentAuth.completeGoogleUsernameForDecoded(decoded, String(req.body.username));
+    logAuthSesionInicio(
+      result.user.id,
+      nombreVisibleEstudiante(result.user),
+      result.user.email
+    );
     sendSuccessResponse(res, 200, "Perfil completado. Podés continuar al dashboard.", result);
+  }),
+];
+
+export const logoutHandler = [
+  authenticateToken,
+  asyncWrapper(async (req: AuthenticatedRequest, res: Response) => {
+    const user = req.user!;
+    logAuthSesionCierre(user.id, user.nombre, user.email);
+    sendSuccessResponse(res, 200, "Sesión cerrada.", null);
   }),
 ];
