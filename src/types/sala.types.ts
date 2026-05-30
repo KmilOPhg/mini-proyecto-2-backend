@@ -5,6 +5,7 @@ export type SalaFirestore = {
   nombre: string;
   creadorUid: string;
   participantes: string[];
+  codigoInvitacion?: string;
   createdAt?: Timestamp;
   updatedAt?: Timestamp;
 };
@@ -15,6 +16,7 @@ export type SalaPublica = {
   nombre: string;
   creadorUid: string;
   participantes: string[];
+  codigoInvitacion: string | null;
   esCreador: boolean;
   createdAt: string | null;
   updatedAt: string | null;

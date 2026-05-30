@@ -6,6 +6,7 @@ import {
   listarMensajesController,
   listarMisSalasController,
   obtenerSalaController,
+  unirsePorCodigoController,
   unirseSalaController,
 } from "../controllers/sala.controller.js";
 
@@ -16,6 +17,9 @@ router.get("/mias", listarMisSalasController);
 
 // POST /api/salas (US-06)
 router.post("/", crearSalaController);
+
+// POST /api/salas/unirse-por-codigo (TS-02)
+router.post("/unirse-por-codigo", unirsePorCodigoController);
 
 // GET /api/salas/:id/mensajes
 router.get("/:id/mensajes", listarMensajesController);
