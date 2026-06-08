@@ -22,6 +22,7 @@ const localOrigins = [
   "http://127.0.0.1:5176",
   "http://localhost:1206",
   "http://127.0.0.1:1206",
+  "http://10.222.185.24:5173",
 ];
 
 const corsOptions: CorsOptions = {
