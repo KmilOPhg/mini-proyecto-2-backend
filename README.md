@@ -132,6 +132,53 @@ io("http://localhost:1206", {
 | `mensaje:nuevo` | Mensaje persistido |
 | `presencia:actualizada` | `{ salaId, usuarios[] }` — quién está conectado |
 
+### WebRTC (Lógica P2P)
+
+La comunicación audiovisual utiliza WebRTC para establecer
+conexiones Peer-to-Peer entre participantes de una sala.
+
+El servidor Socket.io se utiliza únicamente como servidor
+de señalización (signaling server) para intercambiar:
+
+- SDP Offer
+- SDP Answer
+- ICE Candidates
+
+#### Flujo de conexión
+
+1. Usuario A entra a la sala.
+2. Usuario B entra a la sala.
+3. Se intercambian ofertas SDP mediante Socket.io.
+4. Se intercambian respuestas SDP.
+5. Se intercambian ICE Candidates.
+6. Se establece la conexión P2P.
+7. Los streams de audio y video se transmiten directamente entre pares.
+
+#### Compartir pantalla
+
+Cuando un usuario comparte pantalla:
+
+- Se obtiene un nuevo MediaStream mediante
+  `navigator.mediaDevices.getDisplayMedia()`.
+- El track de video original es reemplazado usando
+  `RTCRtpSender.replaceTrack()`.
+- Los demás participantes reciben automáticamente
+  el nuevo stream sin reconectar la llamada.
+
+#### Control de estados AV
+
+Los cambios de mute y cámara apagada se sincronizan
+mediante eventos Socket.io.
+
+Eventos:
+
+- media:toggle-audio
+- media:toggle-video
+- media:state-changed
+
+Estos eventos permiten actualizar los iconos visuales
+de todos los participantes en tiempo real.0000
+
 ## Reglas de seguridad Firestore (criterio C4)
 
 El archivo **`firestore.rules`** en la raíz del repo define quién puede leer/escribir desde el **cliente** (SDK web). Las **escrituras** de negocio (registro, perfil, salas, mensajes) las hace el **backend** con Admin SDK y no dependen de estas reglas.
