@@ -177,7 +177,7 @@ Eventos:
 - media:state-changed
 
 Estos eventos permiten actualizar los iconos visuales
-de todos los participantes en tiempo real.0000
+de todos los participantes en tiempo real.
 
 ## Reglas de seguridad Firestore (criterio C4)
 
